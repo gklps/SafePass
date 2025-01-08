@@ -1,10 +1,10 @@
-# SafePass
-SafePass ensures efficient API call routing, wallet management, and handling of multiple Decentralized Identity (DIDs). Users can access the Rubix Network through a user-friendly interface powered by SafePass
+# RubixLiteWallet
+This is a non-custodial wallet server, which manages keys for rubix nodes. It uses BIP39 to generate keys and to sign. The keys are generated on the curve secp256k1. 
 
 ## Commands
 ### Start server 
 ```
-go run main.go
+go run wallet.go
 
 ```
 
