@@ -235,7 +235,6 @@ var portCounter = 20000
 
 func getNextPort() int {
 	defer func() { portCounter++ }()
-	fmt.Println("port counter", portCounter)
 	return 20000
 }
 
@@ -560,7 +559,6 @@ func VerifyToken(tokenString string, publicKey *ecdsa.PublicKey) (bool, jwt.MapC
 // @Failure 500 {object} ErrorResponse
 // @Router /create_wallet [post]
 func createWalletHandler(c *gin.Context) {
-	fmt.Println("create_wallet")
 	var req DIDRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input, " + err.Error()})
@@ -596,9 +594,6 @@ func createWalletHandler(c *gin.Context) {
 
 	// Save user to database
 	privKeyStr := hex.EncodeToString(privateKey.Serialize())
-	fmt.Println("Private key: ", privKeyStr)
-	fmt.Println("Public key: ", pubKeyStr)
-	fmt.Println("DID: ", did)
 	err = storage.InsertUser(did, pubKeyStr, privKeyStr, mnemonic, req.Port)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to store user data, " + err.Error()})
@@ -1334,7 +1329,6 @@ func generateKeyPair(mnemonic string) (*secp256k1.PrivateKey, *secp256k1.PublicK
 // send DID request to rubix node
 func didRequest(pubkey *secp256k1.PublicKey, rubixNodePort string) (string, string, error) {
 	pubKeyStr := hex.EncodeToString(pubkey.SerializeCompressed())
-	fmt.Println("Public key:", pubKeyStr)
 	data := map[string]interface{}{
 		"public_key": pubKeyStr,
 	}
@@ -1360,14 +1354,11 @@ func didRequest(pubkey *secp256k1.PublicKey, rubixNodePort string) (string, stri
 		return "", "", err
 	}
 	defer resp.Body.Close()
-	fmt.Println("Response Status:", resp.Status)
 	data2, err := io.ReadAll(resp.Body)
 	if err != nil {
 		fmt.Printf("Error reading response body: %s\n", err)
 		return "", "", err
 	}
-
-	fmt.Println("Response Body in did request :", string(data2))
 
 	// Process the data as needed
 	var response map[string]interface{}
