@@ -236,7 +236,7 @@ var portCounter = 20000
 func getNextPort() int {
 	defer func() { portCounter++ }()
 	fmt.Println("port counter", portCounter)
-	return portCounter
+	return 20000
 }
 
 // check if node is running
@@ -336,8 +336,14 @@ func createUserHandler(c *gin.Context) {
 	walletRequest := `{"port":` + strconv.Itoa(port) + `}`
 	resp, err := http.Post("http://20.193.136.169:8080/create_wallet", "application/json", bytes.NewBuffer([]byte(walletRequest)))
 	if err != nil {
-		log.Printf("Error calling /create_wallet: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not create wallet"})
+		log.Printf("HTTP request error: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not connect to wallet service"})
+		return
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		log.Printf("Unexpected response from /create_wallet: %s", body)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Unexpected response from wallet service"})
 		return
 	}
 	defer resp.Body.Close()
@@ -350,6 +356,11 @@ func createUserHandler(c *gin.Context) {
 		return
 	}
 	log.Printf("Raw response from /create_wallet: %s", string(body))
+	if len(body) == 0 {
+		log.Printf("Empty response from /create_wallet")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Empty response from wallet service"})
+		return
+	}
 
 	// Decode the response
 	var didResponse struct {
@@ -357,14 +368,12 @@ func createUserHandler(c *gin.Context) {
 	}
 	if err := json.Unmarshal(body, &didResponse); err != nil {
 		log.Printf("JSON Unmarshal error: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not decode wallet response"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid wallet response format"})
 		return
 	}
-
-	// Check if DID is empty
 	if didResponse.DID == "" {
 		log.Printf("Received empty DID from /create_wallet")
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Received empty DID from wallet service"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid DID in wallet response"})
 		return
 	}
 
