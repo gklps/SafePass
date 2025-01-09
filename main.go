@@ -335,7 +335,7 @@ func createUserHandler(c *gin.Context) {
 	// Create the wallet and fetch the DID
 	walletRequest := `{"port":` + strconv.Itoa(port) + `}`
 	log.Printf("Sending request to /create_wallet: %s", walletRequest)
-	resp, err := http.Post("http://20.193.136.169:8080/create_wallet", "application/json", bytes.NewBuffer([]byte(walletRequest)))
+	resp, err := http.Post("http://localhost:8080/create_wallet", "application/json", bytes.NewBuffer([]byte(walletRequest)))
 	if err != nil {
 		log.Printf("HTTP request error: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not connect to wallet service"})
@@ -560,6 +560,7 @@ func VerifyToken(tokenString string, publicKey *ecdsa.PublicKey) (bool, jwt.MapC
 // @Failure 500 {object} ErrorResponse
 // @Router /create_wallet [post]
 func createWalletHandler(c *gin.Context) {
+	fmt.Println("create_wallet")
 	var req DIDRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input, " + err.Error()})
@@ -577,6 +578,7 @@ func createWalletHandler(c *gin.Context) {
 	did, pubKeyStr, err := didRequest(publicKey, strconv.Itoa(req.Port))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid request, " + err.Error()})
+		fmt.Println(err)
 		// Add a newline to the response body
 		c.Writer.Write([]byte("\n"))
 		return
@@ -594,6 +596,9 @@ func createWalletHandler(c *gin.Context) {
 
 	// Save user to database
 	privKeyStr := hex.EncodeToString(privateKey.Serialize())
+	fmt.Println("Private key: ", privKeyStr)
+	fmt.Println("Public key: ", pubKeyStr)
+	fmt.Println("DID: ", did)
 	err = storage.InsertUser(did, pubKeyStr, privKeyStr, mnemonic, req.Port)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to store user data, " + err.Error()})
