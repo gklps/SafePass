@@ -1344,7 +1344,7 @@ func didRequest(pubkey *secp256k1.PublicKey, rubixNodePort string) (string, stri
 		return "", "", err
 	}
 
-	url := fmt.Sprintf("http://localhost:%s/api/request-did-for-pubkey", rubixNodePort)
+	url := fmt.Sprintf("http://localhost:20000/api/request-did-for-pubkey", rubixNodePort)
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(bodyJSON))
 	if err != nil {
 		fmt.Println("Error creating HTTP request:", err)
