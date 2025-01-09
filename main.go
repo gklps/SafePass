@@ -334,6 +334,7 @@ func createUserHandler(c *gin.Context) {
 
 	// Create the wallet and fetch the DID
 	walletRequest := `{"port":` + strconv.Itoa(port) + `}`
+	log.Printf("Sending request to /create_wallet: %s", walletRequest)
 	resp, err := http.Post("http://20.193.136.169:8080/create_wallet", "application/json", bytes.NewBuffer([]byte(walletRequest)))
 	if err != nil {
 		log.Printf("HTTP request error: %v", err)
@@ -1328,6 +1329,7 @@ func generateKeyPair(mnemonic string) (*secp256k1.PrivateKey, *secp256k1.PublicK
 // send DID request to rubix node
 func didRequest(pubkey *secp256k1.PublicKey, rubixNodePort string) (string, string, error) {
 	pubKeyStr := hex.EncodeToString(pubkey.SerializeCompressed())
+	fmt.Println("Public key:", pubKeyStr)
 	data := map[string]interface{}{
 		"public_key": pubKeyStr,
 	}
@@ -1369,8 +1371,12 @@ func didRequest(pubkey *secp256k1.PublicKey, rubixNodePort string) (string, stri
 		fmt.Println("Error unmarshaling response:", err)
 	}
 
-	respPubKey := response["public_key"].(string)
-	respDID := response["did"].(string)
+	respPubKey, ok1 := response["public_key"].(string)
+	respDID, ok2 := response["did"].(string)
+	if !ok1 || !ok2 {
+		fmt.Println("Missing keys in the response")
+		return "", "", fmt.Errorf("missing public_key or did in the response")
+	}
 
 	return respDID, respPubKey, nil
 }
