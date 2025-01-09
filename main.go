@@ -235,6 +235,7 @@ var portCounter = 20000
 
 func getNextPort() int {
 	defer func() { portCounter++ }()
+	fmt.Println("port counter", portCounter)
 	return portCounter
 }
 
@@ -326,13 +327,14 @@ func createUserHandler(c *gin.Context) {
 	for {
 		port = getNextPort()
 		if checkPort(port) {
+			log.Printf("Found a free port: %d", port)
 			break
 		}
 	}
 
 	// Create the wallet and fetch the DID
 	walletRequest := `{"port":` + strconv.Itoa(port) + `}`
-	resp, err := http.Post("http://localhost:8080/create_wallet", "application/json", bytes.NewBuffer([]byte(walletRequest)))
+	resp, err := http.Post("http://20.193.136.169:8080/create_wallet", "application/json", bytes.NewBuffer([]byte(walletRequest)))
 	if err != nil {
 		log.Printf("Error calling /create_wallet: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not create wallet"})
