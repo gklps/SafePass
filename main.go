@@ -6,6 +6,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/rand"
 	"database/sql"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -72,15 +73,27 @@ type DIDRequest struct {
 
 // sign request
 type SignRequest struct {
-	Data string `json:"data"`
-	DID  string `json:"did"`
+	Data SignReqData `json:"sign_data"`
+	DID  string      `json:"did"`
 }
 
-// sign response
-type SignResponse struct {
-	DID        string `json:"did"`
-	Signature  string `json:"signature"`
-	SignedData string `json:"signed_data"`
+type SignReqData struct {
+	ID          string `json:"id"`
+	Mode        int    `json:"mode"`
+	Hash        string `json:"hash"`
+	OnlyPrivKey bool   `json:"only_priv_key"`
+}
+
+type SignRespData struct {
+	ID        string       `json:"id"`
+	Mode      int          `json:"mode"`
+	Password  string       `json:"password"`
+	Signature DIDSignature `json:"signature"`
+}
+
+type DIDSignature struct {
+	Pixels    []byte
+	Signature []byte
 }
 
 // transaction request
@@ -673,7 +686,10 @@ func registerDIDHandler(c *gin.Context) {
 		return
 	}
 
-	resp, err := registerDIDRequest(req.DID, strconv.Itoa(user.Port))
+	// // Initialize or retrieve an existing channel for the DID
+	// didChannel, _ := getOrCreateDIDChannel(did)
+
+	response, err := registerDIDRequest(did, strconv.Itoa(user.Port))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": err.Error(),
@@ -682,7 +698,9 @@ func registerDIDHandler(c *gin.Context) {
 		c.Writer.Write([]byte("\n"))
 	}
 
-	c.JSON(http.StatusOK, resp)
+	respMsg, err := callSignHandler(response, did)
+
+	c.JSON(http.StatusOK, respMsg)
 	// Add a newline to the response body if required
 	c.Writer.Write([]byte("\n"))
 }
@@ -811,7 +829,7 @@ func setupQuorumRequest(did string, rubixNodePort string) (string, error) {
 	respStatus := response["status"].(bool)
 
 	if !respStatus {
-		return "", fmt.Errorf("test token generation failed, %s", respMsg)
+		return "", fmt.Errorf("failed to setup quorum, %s", respMsg)
 	}
 
 	return respMsg, nil
@@ -937,7 +955,7 @@ func addPeerRequest(data DIDPeerMap, rubixNodePort string) (string, error) {
 	respStatus := response["status"].(bool)
 
 	if !respStatus {
-		return "", fmt.Errorf("test token generation failed, %s", respMsg)
+		return "", fmt.Errorf("failed to add peer, %s", respMsg)
 	}
 
 	return respMsg, nil
@@ -961,32 +979,106 @@ func signTransactionHandler(c *gin.Context) {
 		return
 	}
 
+	// Decode the Base64 string back to the byte array
+	decodedBytes, err := base64.StdEncoding.DecodeString(req.Data.Hash)
+	if err != nil {
+		fmt.Println("Error decoding Base64 string:", err)
+		return
+	}
+	log.Println("2-decoded bytes:", decodedBytes)
+
 	user, err := storage.GetUserByDID(req.DID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
 		return
 	}
 
-	dataToSign, _ := hex.DecodeString(req.Data)
-	signature, err := signData(user.PrivateKey.ToECDSA(), dataToSign)
+	signature, err := signData(user.PrivateKey.ToECDSA(), decodedBytes)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to sign data"})
 		return
 	}
 
 	// Verify signature
-	if !verifySignature(user.PublicKey, dataToSign, signature) {
+	if !verifySignature(user.PublicKey, decodedBytes, signature) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Signature verification failed"})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"did":        user.DID,
-		"signature":  hex.EncodeToString(signature),
-		"signedData": req.Data,
-	})
+	// sign response
+	signResp := SignRespData{
+		ID:   req.Data.ID,
+		Mode: req.Data.Mode,
+		Signature: DIDSignature{
+			Signature: signature,
+		},
+	}
+	resp, err := signResponse(signResp, user.Port)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, resp)
 	// Add a newline to the response body if required
 	c.Writer.Write([]byte("\n"))
+}
+
+// callSignHandler
+func callSignHandler(response map[string]interface{}, did string) (string, error) {
+	respResult := response["result"].(map[string]interface{})
+	hashStr := respResult["hash"].(string)
+	id := respResult["id"].(string)
+	mode := respResult["mode"].(float64)
+
+	// Decode the Base64 string back to the byte array
+	decodedBytes, err := base64.StdEncoding.DecodeString(hashStr)
+	if err != nil {
+		fmt.Println("Error decoding Base64 string:", err)
+	}
+	log.Println("1-decoded bytes:", decodedBytes)
+
+	// prepare sign request
+	signReq := SignRequest{
+		DID: did,
+		Data: SignReqData{
+			ID:   id,
+			Mode: int(mode),
+			Hash: hashStr,
+		},
+	}
+
+	// signature response
+	bodyJSON, err := json.Marshal(signReq)
+	if err != nil {
+		fmt.Println("error marshalling:", err.Error())
+		return "", err
+	}
+
+	// log.Printf("Sending request to /create_wallet: %s", walletRequest)
+	resp, err := http.Post("http://localhost:8080/sign", "application/json", bytes.NewBuffer(bodyJSON))
+	if err != nil {
+		log.Printf("HTTP request error: %v", err)
+		return "", err
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		log.Printf("Unexpected response from /sign: %s", body)
+		return "", fmt.Errorf("Unexpected response from /sign: %s", body)
+	}
+	defer resp.Body.Close()
+
+	// Read the raw response body
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Printf("Error reading response body: %v", err)
+		return "", err
+	}
+	log.Printf("Raw response from /sign: %s", string(body))
+	if len(body) == 0 {
+		return "", fmt.Errorf("empty response from /sign")
+	}
+	return fmt.Sprintf("%s", string(body)), nil
 }
 
 // @Summary Request a transaction
@@ -1067,11 +1159,10 @@ func requestTransactionHandler(c *gin.Context) {
 	log.Println("Token claims:", claims)
 	result := SendAuthRequest(jwtToken, strconv.Itoa(user.Port))
 
-	c.JSON(http.StatusOK, gin.H{
-		"did":    req.DID,
-		"jwt":    jwtToken,
-		"status": result,
-	})
+	// sign response
+	respMsg, err := callSignHandler(result, did)
+
+	c.JSON(http.StatusOK, respMsg)
 	// Add a newline to the response body if required
 	c.Writer.Write([]byte("\n"))
 }
@@ -1227,8 +1318,12 @@ func createTestRBTHandler(c *gin.Context) {
 		// Add a newline to the response body if required
 		c.Writer.Write([]byte("\n"))
 	}
+	log.Println("response body:", resp)
 
-	c.JSON(http.StatusOK, resp)
+	// sign response
+	respMsg, err := callSignHandler(resp, did)
+
+	c.JSON(http.StatusOK, respMsg)
 	// Add a newline to the response body if required
 	c.Writer.Write([]byte("\n"))
 }
@@ -1378,13 +1473,13 @@ func didRequest(pubkey *secp256k1.PublicKey, rubixNodePort string) (string, stri
 }
 
 // SendAuthRequest sends a JWT authentication request to the Rubix node
-func SendAuthRequest(jwtToken string, rubixNodePort string) string {
+func SendAuthRequest(jwtToken string, rubixNodePort string) map[string]interface{} {
 	log.Println("sending auth request to rubix node...")
 	authURL := fmt.Sprintf("http://localhost:%s/api/send-jwt-from-wallet", rubixNodePort)
 	req, err := http.NewRequest("POST", authURL, nil)
 	if err != nil {
 		log.Fatalf("Failed to create request: %v", err)
-		return "Failed to create request"
+		return nil
 	}
 
 	// Add headers
@@ -1396,7 +1491,7 @@ func SendAuthRequest(jwtToken string, rubixNodePort string) string {
 	resp, err := client.Do(req)
 	if err != nil {
 		log.Fatalf("Error sending request: %v", err)
-		return "Error sending request"
+		return nil
 	}
 	defer resp.Body.Close()
 
@@ -1404,7 +1499,7 @@ func SendAuthRequest(jwtToken string, rubixNodePort string) string {
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		log.Fatalf("Error reading response: %v", err)
-		return "Error reading response"
+		return nil
 	}
 
 	fmt.Printf("Response from Rubix Node: %s\n", body)
@@ -1413,11 +1508,10 @@ func SendAuthRequest(jwtToken string, rubixNodePort string) string {
 	err = json.Unmarshal(body, &response)
 	if err != nil {
 		fmt.Println("Error unmarshaling response:", err)
-		return "Error unmarshaling response"
+		return nil
 	}
 
-	result := response["message"].(string)
-	return result
+	return response
 }
 
 // Sign data using secp256k1 private key
@@ -1431,6 +1525,53 @@ func signData(privateKey crypto.PrivateKey, data []byte) ([]byte, error) {
 
 	// return signature, signedData
 	return signature, nil
+}
+
+// respond to signResponse API in Rubix with signature
+func signResponse(data SignRespData, rubixNodePort int) (string, error) {
+	bodyJSON, err := json.Marshal(data)
+	if err != nil {
+		fmt.Println("Error marshaling JSON:", err)
+		return "", err
+	}
+
+	url := fmt.Sprintf("http://localhost:%s/api/signature-response", strconv.Itoa(rubixNodePort))
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(bodyJSON))
+	if err != nil {
+		fmt.Println("Error creating HTTP request:", err)
+		return "", err
+	}
+
+	req.Header.Set("Content-Type", "application/json; charset=UTF-8")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		fmt.Println("Error sending HTTP request:", err)
+		return "", err
+	}
+	defer resp.Body.Close()
+	data2, err := io.ReadAll(resp.Body)
+	if err != nil {
+		fmt.Printf("Error reading response body: %s\n", err)
+		return "", err
+	}
+
+	// Process the data as needed
+	var response map[string]interface{}
+	err = json.Unmarshal(data2, &response)
+	if err != nil {
+		fmt.Println("Error unmarshaling response:", err)
+	}
+
+	respMsg := response["message"].(string)
+	respStatus := response["status"].(bool)
+
+	if !respStatus {
+		return "", fmt.Errorf("failed to send sign response, %s", respMsg)
+	}
+
+	return respMsg, nil
 }
 
 // verifySignature verifies the signature using the public key.
@@ -1478,19 +1619,19 @@ func RequestBalance(did string, rubixNodePort string) (map[string]interface{}, e
 }
 
 // GenerateTestRBT sends request to generate test RBTs for userd
-func GenerateTestRBT(data GenerateTestRBTRequest, rubixNodePort string) (string, error) {
+func GenerateTestRBT(data GenerateTestRBTRequest, rubixNodePort string) (map[string]interface{}, error) {
 
 	bodyJSON, err := json.Marshal(data)
 	if err != nil {
 		fmt.Println("Error marshaling JSON:", err)
-		return "", err
+		return nil, err
 	}
 
 	url := fmt.Sprintf("http://localhost:%s/api/generate-test-token", rubixNodePort)
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(bodyJSON))
 	if err != nil {
 		fmt.Println("Error creating HTTP request:", err)
-		return "", err
+		return nil, err
 	}
 
 	req.Header.Set("Content-Type", "application/json; charset=UTF-8")
@@ -1499,13 +1640,13 @@ func GenerateTestRBT(data GenerateTestRBTRequest, rubixNodePort string) (string,
 	resp, err := client.Do(req)
 	if err != nil {
 		fmt.Println("Error sending HTTP request:", err)
-		return "", err
+		return nil, err
 	}
 	defer resp.Body.Close()
 	data2, err := io.ReadAll(resp.Body)
 	if err != nil {
 		fmt.Printf("Error reading response body: %s\n", err)
-		return "", err
+		return nil, err
 	}
 
 	// Process the data as needed
@@ -1519,10 +1660,10 @@ func GenerateTestRBT(data GenerateTestRBTRequest, rubixNodePort string) (string,
 	respStatus := response["status"].(bool)
 
 	if !respStatus {
-		return "", fmt.Errorf("test token generation failed, %s", respMsg)
+		return nil, fmt.Errorf("test token generation failed, %s", respMsg)
 	}
 
-	return respMsg, nil
+	return response, nil
 }
 
 // RequestTxnsByDID sends request to Rubix node to provide list of all Txns involving the DID
@@ -1560,21 +1701,21 @@ func RequestTxnsByDID(did string, role string, startDate string, endDate string,
 }
 
 // registerDIDRequestsends request to rubix node to publish the did info in the network
-func registerDIDRequest(did string, rubixNodePort string) (string, error) {
+func registerDIDRequest(did string, rubixNodePort string) (map[string]interface{}, error) {
 	data := map[string]interface{}{
 		"did": did,
 	}
 	bodyJSON, err := json.Marshal(data)
 	if err != nil {
 		fmt.Println("Error marshaling JSON:", err)
-		return "", err
+		return nil, err
 	}
 
 	url := fmt.Sprintf("http://localhost:%s/api/register-did", rubixNodePort)
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(bodyJSON))
 	if err != nil {
 		fmt.Println("Error creating HTTP request:", err)
-		return "", err
+		return nil, err
 	}
 
 	req.Header.Set("Content-Type", "application/json; charset=UTF-8")
@@ -1583,13 +1724,13 @@ func registerDIDRequest(did string, rubixNodePort string) (string, error) {
 	resp, err := client.Do(req)
 	if err != nil {
 		fmt.Println("Error sending HTTP request:", err)
-		return "", err
+		return nil, err
 	}
 	defer resp.Body.Close()
 	data2, err := io.ReadAll(resp.Body)
 	if err != nil {
 		fmt.Printf("Error reading response body: %s\n", err)
-		return "", err
+		return nil, err
 	}
 
 	// Process the data as needed
@@ -1597,16 +1738,19 @@ func registerDIDRequest(did string, rubixNodePort string) (string, error) {
 	err = json.Unmarshal(data2, &response)
 	if err != nil {
 		fmt.Println("Error unmarshaling response:", err)
+		return nil, err
 	}
+
+	fmt.Println("response data after unmarshal : ", response)
 
 	respMsg := response["message"].(string)
 	respStatus := response["status"].(bool)
 
 	if !respStatus {
-		return "", fmt.Errorf("test token generation failed, %s", respMsg)
+		return nil, fmt.Errorf("register did failed, %s", respMsg)
 	}
 
-	return respMsg, nil
+	return response, nil
 }
 
 // @Summary Unpledge RBT tokens
@@ -1731,7 +1875,7 @@ func unpledgeRBTRequest(data ReqToRubixNode, rubixNodePort string) (string, erro
 	respStatus := response["status"].(bool)
 
 	if !respStatus {
-		return "", fmt.Errorf("test token generation failed, %s", respMsg)
+		return "", fmt.Errorf("failed to unpledge RBTs, %s", respMsg)
 	}
 
 	return respMsg, nil
@@ -1858,7 +2002,7 @@ func createFTReq(data CreateFTRequest, rubixNodePort string) (string, error) {
 	respStatus := response["status"].(bool)
 
 	if !respStatus {
-		return "", fmt.Errorf("test token generation failed, %s", respMsg)
+		return "", fmt.Errorf("FT generation failed, %s", respMsg)
 	}
 
 	return respMsg, nil
@@ -1937,25 +2081,28 @@ func transferFTHandler(c *gin.Context) {
 		c.Writer.Write([]byte("\n"))
 	}
 
-	c.JSON(http.StatusOK, resp)
+	// sign response
+	respMsg, err := callSignHandler(resp, did)
+
+	c.JSON(http.StatusOK, respMsg)
 	// Add a newline to the response body if required
 	c.Writer.Write([]byte("\n"))
 }
 
 // transferFTRequest sends request to transfer FTs
-func transferFTRequest(data TransferFTReq, rubixNodePort string) (string, error) {
+func transferFTRequest(data TransferFTReq, rubixNodePort string) (map[string]interface{}, error) {
 
 	bodyJSON, err := json.Marshal(data)
 	if err != nil {
 		fmt.Println("Error marshaling JSON:", err)
-		return "", err
+		return nil, err
 	}
 
 	url := fmt.Sprintf("http://localhost:%s/api/initiate-ft-transfer", rubixNodePort)
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(bodyJSON))
 	if err != nil {
 		fmt.Println("Error creating HTTP request:", err)
-		return "", err
+		return nil, err
 	}
 
 	req.Header.Set("Content-Type", "application/json; charset=UTF-8")
@@ -1964,13 +2111,13 @@ func transferFTRequest(data TransferFTReq, rubixNodePort string) (string, error)
 	resp, err := client.Do(req)
 	if err != nil {
 		fmt.Println("Error sending HTTP request:", err)
-		return "", err
+		return nil, err
 	}
 	defer resp.Body.Close()
 	data2, err := io.ReadAll(resp.Body)
 	if err != nil {
 		fmt.Printf("Error reading response body: %s\n", err)
-		return "", err
+		return nil, err
 	}
 
 	// Process the data as needed
@@ -1980,14 +2127,14 @@ func transferFTRequest(data TransferFTReq, rubixNodePort string) (string, error)
 		fmt.Println("Error unmarshaling response:", err)
 	}
 
-	respMsg := response["message"].(string)
 	respStatus := response["status"].(bool)
+	respMsg := response["message"].(string)
 
 	if !respStatus {
-		return "", fmt.Errorf("test token generation failed, %s", respMsg)
+		return nil, fmt.Errorf("failed to transfer FT, %s", respMsg)
 	}
 
-	return respMsg, nil
+	return response, nil
 }
 
 // @Summary Get all fungible tokens
@@ -2395,7 +2542,7 @@ func createNFTReq(data CreateNFTRequest, rubixNodePort string) (string, error) {
 	respStatus := response["status"].(bool)
 
 	if !respStatus {
-		return "", fmt.Errorf("test token generation failed, %s", respMsg)
+		return "", fmt.Errorf("failed to create NFT, %s", respMsg)
 	}
 
 	return respMsg, nil
@@ -2523,7 +2670,7 @@ func subscribeNFTRequest(nft string, rubixNodePort string) (string, error) {
 	respStatus := response["status"].(bool)
 
 	if !respStatus {
-		return "", fmt.Errorf("test token generation failed, %s", respMsg)
+		return "", fmt.Errorf("failed to subscribe NFT, %s", respMsg)
 	}
 
 	return respMsg, nil
@@ -2602,25 +2749,28 @@ func deployNFTHandler(c *gin.Context) {
 		c.Writer.Write([]byte("\n"))
 	}
 
-	c.JSON(http.StatusOK, resp)
+	// sign response
+	respMsg, err := callSignHandler(resp, did)
+
+	c.JSON(http.StatusOK, respMsg)
 	// Add a newline to the response body if required
 	c.Writer.Write([]byte("\n"))
 }
 
 // deployNFTRequest sends request to deploy NFT
-func deployNFTRequest(data DeployNFTRequest, rubixNodePort string) (string, error) {
+func deployNFTRequest(data DeployNFTRequest, rubixNodePort string) (map[string]interface{}, error) {
 
 	bodyJSON, err := json.Marshal(data)
 	if err != nil {
 		fmt.Println("Error marshaling JSON:", err)
-		return "", err
+		return nil, err
 	}
 
 	url := fmt.Sprintf("http://localhost:%s/api/deploy-nft", rubixNodePort)
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(bodyJSON))
 	if err != nil {
 		fmt.Println("Error creating HTTP request:", err)
-		return "", err
+		return nil, err
 	}
 
 	req.Header.Set("Content-Type", "application/json; charset=UTF-8")
@@ -2629,13 +2779,13 @@ func deployNFTRequest(data DeployNFTRequest, rubixNodePort string) (string, erro
 	resp, err := client.Do(req)
 	if err != nil {
 		fmt.Println("Error sending HTTP request:", err)
-		return "", err
+		return nil, err
 	}
 	defer resp.Body.Close()
 	data2, err := io.ReadAll(resp.Body)
 	if err != nil {
 		fmt.Printf("Error reading response body: %s\n", err)
-		return "", err
+		return nil, err
 	}
 
 	// Process the data as needed
@@ -2649,10 +2799,10 @@ func deployNFTRequest(data DeployNFTRequest, rubixNodePort string) (string, erro
 	respStatus := response["status"].(bool)
 
 	if !respStatus {
-		return "", fmt.Errorf("test token generation failed, %s", respMsg)
+		return nil, fmt.Errorf("failed to deploy NFT, %s", respMsg)
 	}
 
-	return respMsg, nil
+	return response, nil
 }
 
 // @Summary Execute an NFT
@@ -2728,25 +2878,28 @@ func executeNFTHandler(c *gin.Context) {
 		c.Writer.Write([]byte("\n"))
 	}
 
-	c.JSON(http.StatusOK, resp)
+	// sign response
+	respMsg, err := callSignHandler(resp, did)
+
+	c.JSON(http.StatusOK, respMsg)
 	// Add a newline to the response body if required
 	c.Writer.Write([]byte("\n"))
 }
 
 // executeNFTRequest sends request to execute NFT
-func executeNFTRequest(data ExecuteNFTRequest, rubixNodePort string) (string, error) {
+func executeNFTRequest(data ExecuteNFTRequest, rubixNodePort string) (map[string]interface{}, error) {
 
 	bodyJSON, err := json.Marshal(data)
 	if err != nil {
 		fmt.Println("Error marshaling JSON:", err)
-		return "", err
+		return nil, err
 	}
 
 	url := fmt.Sprintf("http://localhost:%s/api/execute-nft", rubixNodePort)
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(bodyJSON))
 	if err != nil {
 		fmt.Println("Error creating HTTP request:", err)
-		return "", err
+		return nil, err
 	}
 
 	req.Header.Set("Content-Type", "application/json; charset=UTF-8")
@@ -2755,13 +2908,13 @@ func executeNFTRequest(data ExecuteNFTRequest, rubixNodePort string) (string, er
 	resp, err := client.Do(req)
 	if err != nil {
 		fmt.Println("Error sending HTTP request:", err)
-		return "", err
+		return nil, err
 	}
 	defer resp.Body.Close()
 	data2, err := io.ReadAll(resp.Body)
 	if err != nil {
 		fmt.Printf("Error reading response body: %s\n", err)
-		return "", err
+		return nil, err
 	}
 
 	// Process the data as needed
@@ -2775,10 +2928,10 @@ func executeNFTRequest(data ExecuteNFTRequest, rubixNodePort string) (string, er
 	respStatus := response["status"].(bool)
 
 	if !respStatus {
-		return "", fmt.Errorf("test token generation failed, %s", respMsg)
+		return nil, fmt.Errorf("failed to execute NFT, %s", respMsg)
 	}
 
-	return respMsg, nil
+	return response, nil
 }
 
 // @Summary Get NFT details
