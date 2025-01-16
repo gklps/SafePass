@@ -89,6 +89,25 @@ definitions:
       receiver:
         type: string
     type: object
+  main.ExecuteSmartContractRequest:
+    properties:
+      comment:
+        type: string
+      executorAddr:
+        type: string
+      quorumType:
+        type: integer
+      smartContractData:
+        type: string
+      smartContractToken:
+        type: string
+    required:
+    - comment
+    - executorAddr
+    - quorumType
+    - smartContractData
+    - smartContractToken
+    type: object
   main.GenerateTestRBTRequest:
     properties:
       did:
@@ -451,6 +470,50 @@ paths:
       summary: Deploy an NFT
       tags:
       - NFT
+  /execute-smart-contract:
+    post:
+      consumes:
+      - application/json
+      description: Executes a smart contract on the Rubix network
+      parameters:
+      - description: Rubix node port
+        in: query
+        name: rubixNodePort
+        required: true
+        type: string
+      - description: Smart contract execution details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/main.ExecuteSmartContractRequest'
+      - description: Authorization token (Bearer <your_token>)
+        in: header
+        name: Authorization
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/main.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/main.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Execute a smart contract
+      tags:
+      - SmartContract
   /execute_nft:
     post:
       consumes:

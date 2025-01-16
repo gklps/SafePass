@@ -178,6 +178,14 @@ type GenerateSmartContractRequest struct {
 	SchemaFilePath string
 }
 
+type ExecuteSmartContractRequest struct {
+	SmartContractToken string `json:"smartContractToken" binding:"required"`
+	ExecutorAddr       string `json:"executorAddr" binding:"required"`
+	QuorumType         int    `json:"quorumType" binding:"required"`
+	Comment            string `json:"comment" binding:"required"`
+	SmartContractData  string `json:"smartContractData" binding:"required"`
+}
+
 // @title Wallet API Documentation
 // @version 1.0
 // @description API documentation for the Wallet application.
@@ -3407,6 +3415,113 @@ func generateSmartContractReq(data GenerateSmartContractRequest, rubixNodePort s
 
 	if !respStatus {
 		return "", fmt.Errorf("smart contract generation failed: %s", respMsg)
+	}
+
+	return respMsg, nil
+}
+
+// @Summary Execute a smart contract
+// @Description Executes a smart contract on the Rubix network
+// @Tags SmartContract
+// @Accept json
+// @Produce json
+// @Param rubixNodePort query string true "Rubix node port"
+// @Param request body ExecuteSmartContractRequest true "Smart contract execution details"
+// @Success 200 {object} map[string]string
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Security BearerAuth
+// @Param Authorization header string true "Authorization token (Bearer <your_token>)"
+// @Router /execute-smart-contract [post]
+func executeSmartContractHandler(c *gin.Context) {
+	tokenString := c.GetHeader("Authorization")
+	if tokenString == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Token is required"})
+		c.Abort()
+		return
+	}
+
+	tokenString = tokenString[len("Bearer "):]
+
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("Unexpected signing method")
+		}
+		return jwtSecret, nil
+	})
+
+	if err != nil || !token.Valid {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
+		c.Abort()
+		return
+	}
+
+	rubixNodePort := c.Query("rubixNodePort")
+	if rubixNodePort == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Rubix node port is required"})
+		return
+	}
+
+	var req ExecuteSmartContractRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input"})
+		return
+	}
+
+	resp, err := executeSmartContractReq(req, rubixNodePort)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.Writer.Write([]byte("\n"))
+		return
+	}
+
+	c.JSON(http.StatusOK, resp)
+	c.Writer.Write([]byte("\n"))
+}
+
+// executeSmartContractReq requests the Rubix node to execute a smart contract
+func executeSmartContractReq(data ExecuteSmartContractRequest, rubixNodePort string) (string, error) {
+	bodyJSON, err := json.Marshal(data)
+	if err != nil {
+		fmt.Println("Error marshaling JSON:", err)
+		return "", err
+	}
+
+	url := fmt.Sprintf("http://localhost:%s/api/execute-smart-contract", rubixNodePort)
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(bodyJSON))
+	if err != nil {
+		fmt.Println("Error creating HTTP request:", err)
+		return "", err
+	}
+
+	req.Header.Set("Content-Type", "application/json; charset=UTF-8")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		fmt.Println("Error sending HTTP request:", err)
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	data2, err := io.ReadAll(resp.Body)
+	if err != nil {
+		fmt.Printf("Error reading response body: %s\n", err)
+		return "", err
+	}
+
+	var response map[string]interface{}
+	err = json.Unmarshal(data2, &response)
+	if err != nil {
+		fmt.Println("Error unmarshaling response:", err)
+		return "", err
+	}
+
+	respMsg := response["message"].(string)
+	respStatus := response["status"].(bool)
+
+	if !respStatus {
+		return "", fmt.Errorf("smart contract execution failed: %s", respMsg)
 	}
 
 	return respMsg, nil

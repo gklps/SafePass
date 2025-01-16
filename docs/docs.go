@@ -426,6 +426,74 @@ const docTemplate = `{
                 }
             }
         },
+        "/execute-smart-contract": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Executes a smart contract on the Rubix network",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SmartContract"
+                ],
+                "summary": "Execute a smart contract",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Rubix node port",
+                        "name": "rubixNodePort",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "description": "Smart contract execution details",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/main.ExecuteSmartContractRequest"
+                        }
+                    },
+                    {
+                        "type": "string",
+                        "description": "Authorization token (Bearer \u003cyour_token\u003e)",
+                        "name": "Authorization",
+                        "in": "header",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/main.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/main.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/execute_nft": {
             "post": {
                 "security": [
@@ -1692,6 +1760,33 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "receiver": {
+                    "type": "string"
+                }
+            }
+        },
+        "main.ExecuteSmartContractRequest": {
+            "type": "object",
+            "required": [
+                "comment",
+                "executorAddr",
+                "quorumType",
+                "smartContractData",
+                "smartContractToken"
+            ],
+            "properties": {
+                "comment": {
+                    "type": "string"
+                },
+                "executorAddr": {
+                    "type": "string"
+                },
+                "quorumType": {
+                    "type": "integer"
+                },
+                "smartContractData": {
+                    "type": "string"
+                },
+                "smartContractToken": {
                     "type": "string"
                 }
             }
