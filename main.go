@@ -3322,15 +3322,15 @@ func generateSmartContractHandler(c *gin.Context) {
 		return
 	}
 
+	fmt.Println("req", req)
+
 	resp, err := generateSmartContractReq(req, rubixNodePort)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	c.JSON(http.StatusOK, resp)
-	c.Writer.Write([]byte("\n"))
 }
 
 // generateSmartContractReq requests the Rubix node to generate a smart contract
@@ -3338,79 +3338,107 @@ func generateSmartContractReq(data GenerateSmartContractRequest, rubixNodePort s
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
 
-	_ = writer.WriteField("did", data.DID)
+	// Add DID
+	if err := writer.WriteField("did", data.DID); err != nil {
+		log.Printf("Error adding DID field: %v", err)
+		return "", err
+	}
 
+	// Handle Binary File
+	log.Println("Binary file path:", data.BinaryCodePath)
 	binaryFile, err := os.Open(data.BinaryCodePath)
 	if err != nil {
-		fmt.Println("Error opening binary file:", err)
-		return "", err
+		log.Printf("Failed to open binary file at path: %s, Error: %v", data.BinaryCodePath, err)
+		return "", fmt.Errorf("Error opening binary file: %v", err)
 	}
 	defer binaryFile.Close()
 
 	binaryPart, err := writer.CreateFormFile("binaryCodePath", data.BinaryCodePath)
 	if err != nil {
-		fmt.Println("Error creating binary file part:", err)
+		log.Printf("Error creating binary file part: %v", err)
 		return "", err
 	}
-	_, _ = io.Copy(binaryPart, binaryFile)
+	_, err = io.Copy(binaryPart, binaryFile)
+	if err != nil {
+		log.Printf("Error copying binary file: %v", err)
+		return "", err
+	}
 
+	// Handle Raw Code File
 	rawFile, err := os.Open(data.RawCodePath)
 	if err != nil {
-		fmt.Println("Error opening raw file:", err)
+		log.Printf("Failed to open raw file at path: %s, Error: %v", data.RawCodePath, err)
 		return "", err
 	}
 	defer rawFile.Close()
 
 	rawPart, err := writer.CreateFormFile("rawCodePath", data.RawCodePath)
 	if err != nil {
-		fmt.Println("Error creating raw file part:", err)
+		log.Printf("Error creating raw file part: %v", err)
 		return "", err
 	}
-	_, _ = io.Copy(rawPart, rawFile)
+	_, err = io.Copy(rawPart, rawFile)
+	if err != nil {
+		log.Printf("Error copying raw file: %v", err)
+		return "", err
+	}
 
+	// Handle Schema File
 	schemaFile, err := os.Open(data.SchemaFilePath)
 	if err != nil {
-		fmt.Println("Error opening schema file:", err)
+		log.Printf("Failed to open schema file at path: %s, Error: %v", data.SchemaFilePath, err)
 		return "", err
 	}
 	defer schemaFile.Close()
 
 	schemaPart, err := writer.CreateFormFile("schemaFilePath", data.SchemaFilePath)
 	if err != nil {
-		fmt.Println("Error creating schema file part:", err)
+		log.Printf("Error creating schema file part: %v", err)
 		return "", err
 	}
-	_, _ = io.Copy(schemaPart, schemaFile)
+	_, err = io.Copy(schemaPart, schemaFile)
+	if err != nil {
+		log.Printf("Error copying schema file: %v", err)
+		return "", err
+	}
 
-	_ = writer.Close()
+	// Finalize the writer (close it)
+	err = writer.Close()
+	if err != nil {
+		log.Printf("Error closing multipart writer: %v", err)
+		return "", err
+	}
 
+	// Create the HTTP request
 	url := fmt.Sprintf("http://localhost:%s/api/generate-smart-contract", rubixNodePort)
 	req, err := http.NewRequest("POST", url, body)
 	if err != nil {
-		fmt.Println("Error creating HTTP request:", err)
+		log.Printf("Error creating HTTP request: %v", err)
 		return "", err
 	}
 
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 
+	// Send the request
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		fmt.Println("Error sending HTTP request:", err)
+		log.Printf("Error sending HTTP request: %v", err)
 		return "", err
 	}
 	defer resp.Body.Close()
 
+	// Read and process the response
 	data2, err := io.ReadAll(resp.Body)
 	if err != nil {
-		fmt.Printf("Error reading response body: %s\n", err)
+		log.Printf("Error reading response body: %v", err)
 		return "", err
 	}
 
 	var response map[string]interface{}
 	err = json.Unmarshal(data2, &response)
 	if err != nil {
-		fmt.Println("Error unmarshaling response:", err)
+		log.Printf("Error unmarshaling response: %v", err)
 		return "", err
 	}
 
@@ -3418,7 +3446,7 @@ func generateSmartContractReq(data GenerateSmartContractRequest, rubixNodePort s
 	respStatus := response["status"].(bool)
 
 	if !respStatus {
-		return "", fmt.Errorf("smart contract generation failed: %s", respMsg)
+		return "", fmt.Errorf("Smart contract generation failed: %s", respMsg)
 	}
 
 	return respMsg, nil
