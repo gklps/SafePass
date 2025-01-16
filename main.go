@@ -3392,16 +3392,31 @@ func generateSmartContractHandler(c *gin.Context) {
 		return
 	}
 
+	// Call the Rubix node to generate the smart contract
+	data := GenerateSmartContractRequest{
+		DID:            c.PostForm("did"),
+		BinaryCodePath: binaryFilePath,
+		RawCodePath:    rawFilePath,
+		SchemaFilePath: schemaFilePath,
+	}
+
+	// Trigger Rubix Node call
+	respMsg, err := generateSmartContractReq(data, rubixNodePort)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error generating smart contract"})
+		return
+	}
+
 	// Respond with the paths or stream the files back to the client
 	c.JSON(http.StatusOK, gin.H{
-		"message":        "Files uploaded successfully",
+		"message":        respMsg, // This will be the response from Rubix node
 		"binaryFilePath": binaryFilePath,
 		"rawFilePath":    rawFilePath,
 		"schemaFilePath": schemaFilePath,
 	})
 
-	// Stream the files back to the client
-	c.File(binaryFilePath) // Example of sending the binary file back
+	// Stream the files back to the client (if required)
+	// c.File(binaryFilePath) // Example of sending the binary file back
 	// Similarly, you can stream rawFilePath or schemaFilePath if needed.
 }
 
@@ -3481,6 +3496,7 @@ func generateSmartContractReq(data GenerateSmartContractRequest, rubixNodePort s
 		return "", err
 	}
 
+	log.Printf("Generated smart contract request: %v", data)
 	// Create the HTTP request
 	url := fmt.Sprintf("http://localhost:%s/api/generate-smart-contract", rubixNodePort)
 	req, err := http.NewRequest("POST", url, body)
