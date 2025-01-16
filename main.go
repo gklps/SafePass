@@ -15,6 +15,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -24,6 +25,7 @@ import (
 	_ "github.com/gklps/wallet-frontend/docs" // Local Swagger docs import
 	"github.com/gklps/wallet-frontend/storage"
 	"github.com/golang-jwt/jwt"
+	"github.com/google/uuid"
 	_ "github.com/mattn/go-sqlite3"            // SQLite driver
 	swaggerFiles "github.com/swaggo/files"     // Swagger files
 	ginSwagger "github.com/swaggo/gin-swagger" // Swagger UI handler
@@ -3316,21 +3318,91 @@ func generateSmartContractHandler(c *gin.Context) {
 		return
 	}
 
-	var req GenerateSmartContractRequest
-	if err := c.ShouldBind(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input"})
-		return
-	}
-
-	fmt.Println("req", req)
-
-	resp, err := generateSmartContractReq(req, rubixNodePort)
+	err = c.Request.ParseMultipartForm(10 << 20) // Limit to 10 MB
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Unable to parse form data"})
 		return
 	}
 
-	c.JSON(http.StatusOK, resp)
+	// Save the files to the server's file system
+	binaryFile, _, err := c.Request.FormFile("binaryCodePath")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Error reading binary file"})
+		return
+	}
+	defer binaryFile.Close()
+
+	rawFile, _, err := c.Request.FormFile("rawCodePath")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Error reading raw file"})
+		return
+	}
+	defer rawFile.Close()
+
+	schemaFile, _, err := c.Request.FormFile("schemaFilePath")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Error reading schema file"})
+		return
+	}
+	defer schemaFile.Close()
+
+	// Create a directory to save the files
+	saveDir := "./uploads"
+	os.MkdirAll(saveDir, os.ModePerm)
+
+	uniqueID := uuid.New().String()
+	// Create unique file paths using UUIDs
+	binaryFilePath := filepath.Join(saveDir, fmt.Sprintf("%s_binaryCodePath", uniqueID))
+	rawFilePath := filepath.Join(saveDir, fmt.Sprintf("%s_rawCodePath", uniqueID))
+	schemaFilePath := filepath.Join(saveDir, fmt.Sprintf("%s_schemaFilePath", uniqueID))
+
+	binaryOut, err := os.Create(binaryFilePath)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error saving binary file"})
+		return
+	}
+	defer binaryOut.Close()
+	_, err = io.Copy(binaryOut, binaryFile)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error saving binary file"})
+		return
+	}
+
+	rawOut, err := os.Create(rawFilePath)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error saving raw file"})
+		return
+	}
+	defer rawOut.Close()
+	_, err = io.Copy(rawOut, rawFile)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error saving raw file"})
+		return
+	}
+
+	schemaOut, err := os.Create(schemaFilePath)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error saving schema file"})
+		return
+	}
+	defer schemaOut.Close()
+	_, err = io.Copy(schemaOut, schemaFile)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error saving schema file"})
+		return
+	}
+
+	// Respond with the paths or stream the files back to the client
+	c.JSON(http.StatusOK, gin.H{
+		"message":        "Files uploaded successfully",
+		"binaryFilePath": binaryFilePath,
+		"rawFilePath":    rawFilePath,
+		"schemaFilePath": schemaFilePath,
+	})
+
+	// Stream the files back to the client
+	c.File(binaryFilePath) // Example of sending the binary file back
+	// Similarly, you can stream rawFilePath or schemaFilePath if needed.
 }
 
 // generateSmartContractReq requests the Rubix node to generate a smart contract
