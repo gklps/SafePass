@@ -248,6 +248,10 @@ func main() {
 	r.GET("get_nft", getNFTHandler)
 	r.GET("get_nft_chain", getNFTChainHandler)
 	r.GET("get_all_nft", getAllNFTHandler)
+	//SmartContract Endpoints
+	r.POST("/generate-smart-contract", generateSmartContractHandler)
+	r.POST("/deploy-smart-contract", deploySmartContractHandler)
+	r.POST("/execute-smart-contract", executeSmartContractHandler)
 
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
