@@ -585,8 +585,10 @@ func createWalletHandler(c *gin.Context) {
 	mnemonic, _ := bip39.NewMnemonic(entropy)
 	privateKey, publicKey := generateKeyPair(mnemonic)
 
+	pubKeyStr := hex.EncodeToString(publicKey.SerializeCompressed())
+
 	// Request user DID from Rubix node
-	did, pubKeyStr, err := didRequest(publicKey, strconv.Itoa(req.Port))
+	did, err := didRequest(pubKeyStr, strconv.Itoa(req.Port))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid request, " + err.Error()})
 		fmt.Println(err)
@@ -1042,9 +1044,10 @@ func callSignHandler(response map[string]interface{}, did string) (string, error
 	signReq := SignRequest{
 		DID: did,
 		Data: SignReqData{
-			ID:   id,
-			Mode: int(mode),
-			Hash: hashStr,
+			ID:          id,
+			Mode:        int(mode),
+			Hash:        hashStr,
+			OnlyPrivKey: true,
 		},
 	}
 
@@ -1422,22 +1425,21 @@ func generateKeyPair(mnemonic string) (*secp256k1.PrivateKey, *secp256k1.PublicK
 }
 
 // send DID request to rubix node
-func didRequest(pubkey *secp256k1.PublicKey, rubixNodePort string) (string, string, error) {
-	pubKeyStr := hex.EncodeToString(pubkey.SerializeCompressed())
+func didRequest(pubKeyStr string, rubixNodePort string) (string, error) {
 	data := map[string]interface{}{
 		"public_key": pubKeyStr,
 	}
 	bodyJSON, err := json.Marshal(data)
 	if err != nil {
 		fmt.Println("Error marshaling JSON:", err)
-		return "", "", err
+		return "", err
 	}
 
 	url := fmt.Sprintf("http://localhost:20000/api/request-did-for-pubkey")
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(bodyJSON))
 	if err != nil {
 		fmt.Println("Error creating HTTP request:", err)
-		return "", "", err
+		return "", err
 	}
 
 	req.Header.Set("Content-Type", "application/json; charset=UTF-8")
@@ -1446,13 +1448,13 @@ func didRequest(pubkey *secp256k1.PublicKey, rubixNodePort string) (string, stri
 	resp, err := client.Do(req)
 	if err != nil {
 		fmt.Println("Error sending HTTP request:", err)
-		return "", "", err
+		return "", err
 	}
 	defer resp.Body.Close()
 	data2, err := io.ReadAll(resp.Body)
 	if err != nil {
 		fmt.Printf("Error reading response body: %s\n", err)
-		return "", "", err
+		return "", err
 	}
 
 	// Process the data as needed
@@ -1462,14 +1464,13 @@ func didRequest(pubkey *secp256k1.PublicKey, rubixNodePort string) (string, stri
 		fmt.Println("Error unmarshaling response:", err)
 	}
 
-	respPubKey, ok1 := response["public_key"].(string)
-	respDID, ok2 := response["did"].(string)
-	if !ok1 || !ok2 {
-		fmt.Println("Missing keys in the response")
-		return "", "", fmt.Errorf("missing public_key or did in the response")
+	respDID, ok := response["did"].(string)
+	if !ok {
+		fmt.Println("Missing did in the response")
+		return "", fmt.Errorf("missing did in the response")
 	}
 
-	return respDID, respPubKey, nil
+	return respDID, nil
 }
 
 // SendAuthRequest sends a JWT authentication request to the Rubix node
