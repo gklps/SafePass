@@ -198,23 +198,24 @@ curl -L -X POST http://localhost:8080/rbt/unpledge -H 'Authorization: Bearer eyJ
 
 ### Curl request to sign
 ```
-curl -X POST http://localhost:8080/sign -d '{"did":"<rubix node DID>","data":"<signing data>"}'
+curl -X POST http://localhost:8080/sign -d '{"did":"<rubix node DID>","sign_data":{"hash":"<string>","id":"<string>","mode":4}}'
 ```
 #### sample with valid request 
 ```
-curl -X POST http://localhost:8080/sign -d '{"did":"bafybmic6olksvxucqrxfbwqptyshu5tahprawhnipemihj7opfccpk2dbq","data":"txn_data"}'
+curl -X POST http://localhost:8080/sign -d '{"did":"bafybmifqpi36mvzocqqpsh3rtjrjy5434wlqv4nz7zr4ejqx3qul5gl36q","sign_data":{"hash":"YmY0ZGI0NDEzNWZkYTg2Nzc1YTg1ZWQzMTRjZmIyZTI0MmVmZjBjYzdmOTI3OWNiYzVkZmQ5NjAxMTNkNDlhYQ==","id":"0319B7FA-F9CF-4019-97AB-FA5D69608735","mode":4}}'
 ```
 **Response:**
+while transacting RBTs
 ```
-{"did":"bafybmic6olksvxucqrxfbwqptyshu5tahprawhnipemihj7opfccpk2dbq","signature":"3046022100b28b4bc6de55f419f9e2f887198cb6fd5d50fd59bb90a19fb40b5865ee542b71022100a09201751c45517d1063d2616ef29ec27b94f548c384aa2cb7850de76c69f55c","signedData":"txn_data"}
+"\"Transfer finished successfully in 6.679579318s with trnxid 7c57df13b39e7eed7c5980eb4e4b78f0eadee662cff2b49a47b9b7534b2067b9\"\n"
 ```
 #### sample with invalid request (invalid did)
 ```
-curl -X POST http://localhost:8080/sign -d '{"did":"bafybmic6olksvxucqrxfbwqptyshu5tahprawhnipemihj7opfccpk287h","data":"txn_data"}'
+curl -X POST http://localhost:8080/sign -d '{"did":"bafybmifqpi36mvzocqqpsh3rtjrjy5434wlqv4nz7zr4ejqx3qul5gl36q","sign_data":{"hash":"YmY0ZGI0NDEzNWZkYTg2Nzc1YTg1ZWQzMTRjZmIyZTI0MmVmZjBjYzdmOTI3OWNiYzVkZmQ5NjAxMTNkNDlhYQ==","id":"","mode":4}}'
 ```
 **Response:**
 ```
-{"error":"User not found"}
+{"error":"failed to send sign response, Invalid request ID"}
 ```
 
 
