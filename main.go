@@ -698,9 +698,19 @@ func registerDIDHandler(c *gin.Context) {
 		})
 		// Add a newline to the response body if required
 		c.Writer.Write([]byte("\n"))
+		return
 	}
 
 	respMsg, err := callSignHandler(response, did)
+	if err != nil {
+		log.Println("failed to call sign handler, err:", err.Error())
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": err.Error(),
+		})
+		// Add a newline to the response body if required
+		c.Writer.Write([]byte("\n"))
+		return
+	}
 
 	c.JSON(http.StatusOK, respMsg)
 	// Add a newline to the response body if required
