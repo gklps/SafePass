@@ -2007,7 +2007,7 @@ func createFTHandler(c *gin.Context) {
 		return
 	}
 
-	resp, err := createFTReq(req, strconv.Itoa(user.Port))
+	response, err := createFTReq(req, strconv.Itoa(user.Port))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": err.Error(),
@@ -2016,17 +2016,28 @@ func createFTHandler(c *gin.Context) {
 		c.Writer.Write([]byte("\n"))
 	}
 
-	c.JSON(http.StatusOK, resp)
+	respMsg, err := callSignHandler(response, did)
+	if err != nil {
+		log.Println("failed to call sign handler, err:", err.Error())
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": err.Error(),
+		})
+		// Add a newline to the response body if required
+		c.Writer.Write([]byte("\n"))
+		return
+	}
+
+	c.JSON(http.StatusOK, respMsg)
 	// Add a newline to the response body if required
 	c.Writer.Write([]byte("\n"))
 }
 
 // createFTReq requests the rubix node to create FTs
-func createFTReq(data CreateFTRequest, rubixNodePort string) (string, error) {
+func createFTReq(data CreateFTRequest, rubixNodePort string) (map[string]interface{}, error) {
 	bodyJSON, err := json.Marshal(data)
 	if err != nil {
 		fmt.Println("Error marshaling JSON:", err)
-		return "", err
+		return nil, err
 	}
 
 	log.Println("port in str:", rubixNodePort)
@@ -2034,7 +2045,7 @@ func createFTReq(data CreateFTRequest, rubixNodePort string) (string, error) {
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(bodyJSON))
 	if err != nil {
 		fmt.Println("Error creating HTTP request:", err)
-		return "", err
+		return nil, err
 	}
 
 	req.Header.Set("Content-Type", "application/json; charset=UTF-8")
@@ -2043,13 +2054,13 @@ func createFTReq(data CreateFTRequest, rubixNodePort string) (string, error) {
 	resp, err := client.Do(req)
 	if err != nil {
 		fmt.Println("Error sending HTTP request:", err)
-		return "", err
+		return nil, err
 	}
 	defer resp.Body.Close()
 	data2, err := io.ReadAll(resp.Body)
 	if err != nil {
 		fmt.Printf("Error reading response body: %s\n", err)
-		return "", err
+		return nil, err
 	}
 
 	// Process the data as needed
@@ -2063,10 +2074,10 @@ func createFTReq(data CreateFTRequest, rubixNodePort string) (string, error) {
 	respStatus := response["status"].(bool)
 
 	if !respStatus {
-		return "", fmt.Errorf("FT generation failed, %s", respMsg)
+		return nil, fmt.Errorf("FT generation failed, %s", respMsg)
 	}
 
-	return respMsg, nil
+	return response, nil
 }
 
 // @Summary Transfer fungible tokens
@@ -2144,6 +2155,15 @@ func transferFTHandler(c *gin.Context) {
 
 	// sign response
 	respMsg, err := callSignHandler(resp, did)
+	if err != nil {
+		log.Println("failed to call sign handler, err:", err.Error())
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": err.Error(),
+		})
+		// Add a newline to the response body if required
+		c.Writer.Write([]byte("\n"))
+		return
+	}
 
 	c.JSON(http.StatusOK, respMsg)
 	// Add a newline to the response body if required
@@ -2812,6 +2832,15 @@ func deployNFTHandler(c *gin.Context) {
 
 	// sign response
 	respMsg, err := callSignHandler(resp, did)
+	if err != nil {
+		log.Println("failed to call sign handler, err:", err.Error())
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": err.Error(),
+		})
+		// Add a newline to the response body if required
+		c.Writer.Write([]byte("\n"))
+		return
+	}
 
 	c.JSON(http.StatusOK, respMsg)
 	// Add a newline to the response body if required
@@ -2941,6 +2970,15 @@ func executeNFTHandler(c *gin.Context) {
 
 	// sign response
 	respMsg, err := callSignHandler(resp, did)
+	if err != nil {
+		log.Println("failed to call sign handler, err:", err.Error())
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": err.Error(),
+		})
+		// Add a newline to the response body if required
+		c.Writer.Write([]byte("\n"))
+		return
+	}
 
 	c.JSON(http.StatusOK, respMsg)
 	// Add a newline to the response body if required
@@ -3406,23 +3444,35 @@ func deploySmartContractHandler(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, resp)
+	// sign response
+	respMsg, err := callSignHandler(resp, req.DeployerAddr)
+	if err != nil {
+		log.Println("failed to call sign handler, err:", err.Error())
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": err.Error(),
+		})
+		// Add a newline to the response body if required
+		c.Writer.Write([]byte("\n"))
+		return
+	}
+
+	c.JSON(http.StatusOK, respMsg)
 	c.Writer.Write([]byte("\n"))
 }
 
 // deploySmartContractReq requests the Rubix node to deploy a smart contract
-func deploySmartContractReq(data DeploySmartContractRequest, rubixNodePort string) (string, error) {
+func deploySmartContractReq(data DeploySmartContractRequest, rubixNodePort string) (map[string]interface{}, error) {
 	bodyJSON, err := json.Marshal(data)
 	if err != nil {
 		fmt.Println("Error marshaling JSON:", err)
-		return "", err
+		return nil, err
 	}
 
 	url := fmt.Sprintf("http://localhost:%s/api/deploy-smart-contract", rubixNodePort)
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(bodyJSON))
 	if err != nil {
 		fmt.Println("Error creating HTTP request:", err)
-		return "", err
+		return nil, err
 	}
 
 	req.Header.Set("Content-Type", "application/json; charset=UTF-8")
@@ -3431,31 +3481,31 @@ func deploySmartContractReq(data DeploySmartContractRequest, rubixNodePort strin
 	resp, err := client.Do(req)
 	if err != nil {
 		fmt.Println("Error sending HTTP request:", err)
-		return "", err
+		return nil, err
 	}
 	defer resp.Body.Close()
 
 	data2, err := io.ReadAll(resp.Body)
 	if err != nil {
 		fmt.Printf("Error reading response body: %s\n", err)
-		return "", err
+		return nil, err
 	}
 
 	var response map[string]interface{}
 	err = json.Unmarshal(data2, &response)
 	if err != nil {
 		fmt.Println("Error unmarshaling response:", err)
-		return "", err
+		return nil, err
 	}
 
 	respMsg := response["message"].(string)
 	respStatus := response["status"].(bool)
 
 	if !respStatus {
-		return "", fmt.Errorf("smart contract deployment failed: %s", respMsg)
+		return nil, fmt.Errorf("smart contract deployment failed: %s", respMsg)
 	}
 
-	return respMsg, nil
+	return response, nil
 }
 
 // @Summary Generate a smart contract
@@ -3780,23 +3830,35 @@ func executeSmartContractHandler(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, resp)
+	// sign response
+	respMsg, err := callSignHandler(resp, req.ExecutorAddr)
+	if err != nil {
+		log.Println("failed to call sign handler, err:", err.Error())
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": err.Error(),
+		})
+		// Add a newline to the response body if required
+		c.Writer.Write([]byte("\n"))
+		return
+	}
+
+	c.JSON(http.StatusOK, respMsg)
 	c.Writer.Write([]byte("\n"))
 }
 
 // executeSmartContractReq requests the Rubix node to execute a smart contract
-func executeSmartContractReq(data ExecuteSmartContractRequest, rubixNodePort string) (string, error) {
+func executeSmartContractReq(data ExecuteSmartContractRequest, rubixNodePort string) (map[string]interface{}, error) {
 	bodyJSON, err := json.Marshal(data)
 	if err != nil {
 		fmt.Println("Error marshaling JSON:", err)
-		return "", err
+		return nil, err
 	}
 
 	url := fmt.Sprintf("http://localhost:%s/api/execute-smart-contract", rubixNodePort)
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(bodyJSON))
 	if err != nil {
 		fmt.Println("Error creating HTTP request:", err)
-		return "", err
+		return nil, err
 	}
 
 	req.Header.Set("Content-Type", "application/json; charset=UTF-8")
@@ -3805,29 +3867,29 @@ func executeSmartContractReq(data ExecuteSmartContractRequest, rubixNodePort str
 	resp, err := client.Do(req)
 	if err != nil {
 		fmt.Println("Error sending HTTP request:", err)
-		return "", err
+		return nil, err
 	}
 	defer resp.Body.Close()
 
 	data2, err := io.ReadAll(resp.Body)
 	if err != nil {
 		fmt.Printf("Error reading response body: %s\n", err)
-		return "", err
+		return nil, err
 	}
 
 	var response map[string]interface{}
 	err = json.Unmarshal(data2, &response)
 	if err != nil {
 		fmt.Println("Error unmarshaling response:", err)
-		return "", err
+		return nil, err
 	}
 
 	respMsg := response["message"].(string)
 	respStatus := response["status"].(bool)
 
 	if !respStatus {
-		return "", fmt.Errorf("smart contract execution failed: %s", respMsg)
+		return nil, fmt.Errorf("smart contract execution failed: %s", respMsg)
 	}
 
-	return respMsg, nil
+	return response, nil
 }
