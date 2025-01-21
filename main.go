@@ -277,13 +277,26 @@ func main() {
 var portCounter = 20000
 
 func getNextPort() int {
-	defer func() {
-		portCounter++
-		if portCounter > 20009 {
-			portCounter = 20000
-		}
-	}()
-	return portCounter
+	// Query the latest port used in the database
+	var latestPort int
+	err := db.QueryRow("SELECT port FROM users ORDER BY port DESC LIMIT 1").Scan(&latestPort)
+	if err != nil && err != sql.ErrNoRows {
+		log.Printf("Database error while retrieving latest port: %v", err)
+		return 20000 // Fallback to port 20000 if there's an error
+	}
+
+	// If no records are found, start from port 20000
+	if latestPort == 0 {
+		latestPort = 20000
+	}
+
+	// Increment the port, and loop back to 20000 if the port exceeds 20009
+	latestPort++
+	if latestPort > 20009 {
+		latestPort = 20000
+	}
+
+	return latestPort
 }
 
 // check if node is running
