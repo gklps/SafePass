@@ -277,8 +277,13 @@ func main() {
 var portCounter = 20000
 
 func getNextPort() int {
-	defer func() { portCounter++ }()
-	return 20000
+	defer func() {
+		portCounter++
+		if portCounter > 20009 {
+			portCounter = 20000
+		}
+	}()
+	return portCounter
 }
 
 // check if node is running
@@ -354,6 +359,19 @@ func createUserHandler(c *gin.Context) {
 	var newUser CreateUserRequest
 	if err := c.BindJSON(&newUser); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		return
+	}
+
+	// Check if the email already exists in the database
+	var existingEmail string
+	err := db.QueryRow("SELECT email FROM walletUsers WHERE email = ?", newUser.Email).Scan(&existingEmail)
+	if err == nil {
+		// Email already exists
+		c.JSON(http.StatusConflict, gin.H{"error": "Email already in use"})
+		return
+	} else if err != sql.ErrNoRows {
+		// Unexpected database error
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database query error"})
 		return
 	}
 
@@ -1495,7 +1513,7 @@ func didRequest(pubKeyStr string, rubixNodePort string) (string, error) {
 		return "", err
 	}
 
-	url := fmt.Sprintf("http://localhost:20000/api/request-did-for-pubkey")
+	url := fmt.Sprintf("http://localhost:%s/api/request-did-for-pubkey", rubixNodePort)
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(bodyJSON))
 	if err != nil {
 		fmt.Println("Error creating HTTP request:", err)
