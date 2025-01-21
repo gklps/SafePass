@@ -54,6 +54,19 @@ definitions:
       quorum_type:
         type: integer
     type: object
+  main.DeploySmartContractRequest:
+    properties:
+      comment:
+        type: string
+      deployerAddr:
+        type: string
+      quorumType:
+        type: integer
+      rbtamount:
+        type: integer
+      smartContractToken:
+        type: string
+    type: object
   main.ErrorResponse:
     properties:
       error:
@@ -75,6 +88,25 @@ definitions:
         type: integer
       receiver:
         type: string
+    type: object
+  main.ExecuteSmartContractRequest:
+    properties:
+      comment:
+        type: string
+      executorAddr:
+        type: string
+      quorumType:
+        type: integer
+      smartContractData:
+        type: string
+      smartContractToken:
+        type: string
+    required:
+    - comment
+    - executorAddr
+    - quorumType
+    - smartContractData
+    - smartContractToken
     type: object
   main.GenerateTestRBTRequest:
     properties:
@@ -357,6 +389,50 @@ paths:
       summary: Create a new key pair
       tags:
       - DID
+  /deploy-smart-contract:
+    post:
+      consumes:
+      - application/json
+      description: Deploys a smart contract to the Rubix network
+      parameters:
+      - description: Rubix node port
+        in: query
+        name: rubixNodePort
+        required: true
+        type: string
+      - description: Smart contract deployment details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/main.DeploySmartContractRequest'
+      - description: Authorization token (Bearer <your_token>)
+        in: header
+        name: Authorization
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/main.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/main.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Deploy a smart contract
+      tags:
+      - SmartContract
   /deploy_nft:
     post:
       consumes:
@@ -396,6 +472,50 @@ paths:
       summary: Deploy an NFT
       tags:
       - NFT
+  /execute-smart-contract:
+    post:
+      consumes:
+      - application/json
+      description: Executes a smart contract on the Rubix network
+      parameters:
+      - description: Rubix node port
+        in: query
+        name: rubixNodePort
+        required: true
+        type: string
+      - description: Smart contract execution details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/main.ExecuteSmartContractRequest'
+      - description: Authorization token (Bearer <your_token>)
+        in: header
+        name: Authorization
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/main.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/main.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Execute a smart contract
+      tags:
+      - SmartContract
   /execute_nft:
     post:
       consumes:
@@ -435,6 +555,65 @@ paths:
       summary: Execute an NFT
       tags:
       - NFT
+  /generate-smart-contract:
+    post:
+      consumes:
+      - multipart/form-data
+      description: Generates a smart contract using binary code, raw code, and schema
+        files
+      parameters:
+      - description: Rubix node port
+        in: query
+        name: rubixNodePort
+        required: true
+        type: string
+      - description: DID for the smart contract
+        in: formData
+        name: did
+        required: true
+        type: string
+      - description: Binary code file
+        in: formData
+        name: binaryCodePath
+        required: true
+        type: file
+      - description: Raw code file
+        in: formData
+        name: rawCodePath
+        required: true
+        type: file
+      - description: Schema file
+        in: formData
+        name: schemaFilePath
+        required: true
+        type: file
+      - description: Authorization token (Bearer <your_token>)
+        in: header
+        name: Authorization
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/main.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/main.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Generate a smart contract
+      tags:
+      - SmartContract
   /get_all_ft:
     get:
       consumes:
