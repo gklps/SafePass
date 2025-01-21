@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	secp256k1 "github.com/decred/dcrd/dcrec/secp256k1/v4"
@@ -1120,7 +1121,23 @@ func callSignHandler(response map[string]interface{}, did string) (string, error
 	if len(body) == 0 {
 		return "", fmt.Errorf("empty response from /sign")
 	}
-	return fmt.Sprintf("%s", string(body)), nil
+
+	// Parse the response into a map
+	var result map[string]interface{}
+	err = json.Unmarshal(body, &result)
+	if err != nil {
+		fmt.Println("Error unmarshaling response:", err)
+		return "", err
+	}
+
+	respMsg := result["message"].(string)
+
+	// sign again, if the message says 'signature needed'
+	if strings.Contains(respMsg, "Signature needed") {
+		respMsg, err = callSignHandler(result, did)
+	}
+
+	return fmt.Sprintf("%s", respMsg), nil
 }
 
 // @Summary Request a transaction
@@ -1204,7 +1221,11 @@ func requestTransactionHandler(c *gin.Context) {
 	// sign response
 	respMsg, err := callSignHandler(result, did)
 
-	c.JSON(http.StatusOK, respMsg)
+	c.JSON(http.StatusOK, gin.H{
+		"did":    req.DID,
+		"jwt":    jwtToken,
+		"status": respMsg,
+	})
 	// Add a newline to the response body if required
 	c.Writer.Write([]byte("\n"))
 }
@@ -1568,18 +1589,18 @@ func signData(privateKey crypto.PrivateKey, data []byte) ([]byte, error) {
 }
 
 // respond to signResponse API in Rubix with signature
-func signResponse(data SignRespData, rubixNodePort int) (string, error) {
+func signResponse(data SignRespData, rubixNodePort int) (map[string]interface{}, error) {
 	bodyJSON, err := json.Marshal(data)
 	if err != nil {
 		fmt.Println("Error marshaling JSON:", err)
-		return "", err
+		return nil, err
 	}
 
 	url := fmt.Sprintf("http://localhost:%s/api/signature-response", strconv.Itoa(rubixNodePort))
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(bodyJSON))
 	if err != nil {
 		fmt.Println("Error creating HTTP request:", err)
-		return "", err
+		return nil, err
 	}
 
 	req.Header.Set("Content-Type", "application/json; charset=UTF-8")
@@ -1588,13 +1609,13 @@ func signResponse(data SignRespData, rubixNodePort int) (string, error) {
 	resp, err := client.Do(req)
 	if err != nil {
 		fmt.Println("Error sending HTTP request:", err)
-		return "", err
+		return nil, err
 	}
 	defer resp.Body.Close()
 	data2, err := io.ReadAll(resp.Body)
 	if err != nil {
 		fmt.Printf("Error reading response body: %s\n", err)
-		return "", err
+		return nil, err
 	}
 
 	// Process the data as needed
@@ -1608,10 +1629,10 @@ func signResponse(data SignRespData, rubixNodePort int) (string, error) {
 	respStatus := response["status"].(bool)
 
 	if !respStatus {
-		return "", fmt.Errorf("failed to send sign response, %s", respMsg)
+		return nil, fmt.Errorf("failed to send sign response, %s", respMsg)
 	}
 
-	return respMsg, nil
+	return response, nil
 }
 
 // verifySignature verifies the signature using the public key.
