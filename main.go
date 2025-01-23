@@ -615,23 +615,13 @@ func createWalletHandler(c *gin.Context) {
 	mnemonic, _ := bip39.NewMnemonic(entropy)
 	privateKey, publicKey := generateKeyPair(mnemonic)
 
-	pubKeyStr := hex.EncodeToString(publicKey.SerializeCompressed())
+	pubKeyStr := hex.EncodeToString(publicKey.SerializeUncompressed())
 
 	// Request user DID from Rubix node
 	did, err := didRequest(pubKeyStr, strconv.Itoa(req.Port))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid request, " + err.Error()})
 		fmt.Println(err)
-		// Add a newline to the response body
-		c.Writer.Write([]byte("\n"))
-		return
-	}
-
-	// Verify the returned public key
-	pubKeyBytes, _ := hex.DecodeString(pubKeyStr)
-	reconstructedPubKey, _ := secp256k1.ParsePubKey(pubKeyBytes)
-	if !publicKey.IsEqual(reconstructedPubKey) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Public key mismatch \n"})
 		// Add a newline to the response body
 		c.Writer.Write([]byte("\n"))
 		return
