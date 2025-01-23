@@ -17,6 +17,8 @@ require (
 	golang.org/x/crypto v0.32.0
 )
 
+require github.com/google/uuid v1.6.0 // indirect
+
 require (
 	github.com/KyleBanks/depth v1.2.1 // indirect
 	github.com/bytedance/sonic v1.12.7 // indirect

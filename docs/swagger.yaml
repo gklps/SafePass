@@ -130,21 +130,23 @@ definitions:
       port:
         type: string
     type: object
+  main.SignReqData:
+    properties:
+      hash:
+        type: string
+      id:
+        type: string
+      mode:
+        type: integer
+      only_priv_key:
+        type: boolean
+    type: object
   main.SignRequest:
     properties:
-      data:
-        type: string
       did:
         type: string
-    type: object
-  main.SignResponse:
-    properties:
-      did:
-        type: string
-      signature:
-        type: string
-      signed_data:
-        type: string
+      sign_data:
+        $ref: '#/definitions/main.SignReqData'
     type: object
   main.SubscribeNFTRequest:
     properties:
@@ -1064,7 +1066,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/main.SignResponse'
+            $ref: '#/definitions/main.SignRequest'
         "400":
           description: Bad Request
           schema:

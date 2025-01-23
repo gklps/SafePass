@@ -1348,7 +1348,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/main.SignResponse"
+                            "$ref": "#/definitions/main.SignRequest"
                         }
                     },
                     "400": {
@@ -1825,28 +1825,31 @@ const docTemplate = `{
                 }
             }
         },
-        "main.SignRequest": {
+        "main.SignReqData": {
             "type": "object",
             "properties": {
-                "data": {
+                "hash": {
                     "type": "string"
                 },
-                "did": {
+                "id": {
                     "type": "string"
+                },
+                "mode": {
+                    "type": "integer"
+                },
+                "only_priv_key": {
+                    "type": "boolean"
                 }
             }
         },
-        "main.SignResponse": {
+        "main.SignRequest": {
             "type": "object",
             "properties": {
                 "did": {
                     "type": "string"
                 },
-                "signature": {
-                    "type": "string"
-                },
-                "signed_data": {
-                    "type": "string"
+                "sign_data": {
+                    "$ref": "#/definitions/main.SignReqData"
                 }
             }
         },
