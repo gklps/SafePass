@@ -279,7 +279,7 @@ var portCounter = 20000
 func getNextPort() int {
 	// Query the latest port used in the database
 	var latestPort int
-	err := db.QueryRow("SELECT port FROM users ORDER BY port DESC LIMIT 1").Scan(&latestPort)
+	err := db.QueryRow("SELECT port FROM users ORDER BY id DESC LIMIT 1").Scan(&latestPort)
 	if err != nil && err != sql.ErrNoRows {
 		log.Printf("Database error while retrieving latest port: %v", err)
 		return 20000 // Fallback to port 20000 if there's an error
@@ -292,7 +292,7 @@ func getNextPort() int {
 
 	// Increment the port, and loop back to 20000 if the port exceeds 20009
 	latestPort++
-	if latestPort > 20009 {
+	if latestPort > 20006 {
 		latestPort = 20000
 	}
 
