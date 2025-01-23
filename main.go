@@ -180,11 +180,11 @@ type ExecuteNFTRequest struct {
 }
 
 type DeploySmartContractRequest struct {
-	SmartContractToken string
-	DeployerAddr       string
-	RBTAmount          int
-	QuorumType         int
-	Comment            string
+	SmartContractToken string `json:"smartContractToken"`
+	DeployerAddr       string `json:"deployerAddr"`
+	RBTAmount          int    `json:"rbtAmount"`
+	QuorumType         int    `json:"quorumType"`
+	Comment            string `json:"comment"`
 }
 
 type GenerateSmartContractRequest struct {
@@ -200,6 +200,19 @@ type ExecuteSmartContractRequest struct {
 	QuorumType         int    `json:"quorumType" binding:"required"`
 	Comment            string `json:"comment" binding:"required"`
 	SmartContractData  string `json:"smartContractData" binding:"required"`
+}
+
+// subscribe SmartContract request
+type SubscribeSmartContractRequest struct {
+	DID                string `json:"did"`
+	SmartContractToken string `json:"smartContractToken"`
+}
+
+// general response by all handlers
+type BasicResponse struct {
+	Status  bool        `json:"status"`
+	Message string      `json:"message"`
+	Result  interface{} `json:"result"`
 }
 
 // @title Wallet API Documentation
@@ -268,6 +281,7 @@ func main() {
 	r.POST("/generate-smart-contract", generateSmartContractHandler)
 	r.POST("/deploy-smart-contract", deploySmartContractHandler)
 	r.POST("/execute-smart-contract", executeSmartContractHandler)
+	r.POST("/subscribe-smart-contract", subscribeSmartContractHandler)
 
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
@@ -615,23 +629,12 @@ func createWalletHandler(c *gin.Context) {
 	mnemonic, _ := bip39.NewMnemonic(entropy)
 	privateKey, publicKey := generateKeyPair(mnemonic)
 
-	pubKeyStr := hex.EncodeToString(publicKey.SerializeCompressed())
+	pubKeyStr := hex.EncodeToString(publicKey.SerializeUncompressed())
 
 	// Request user DID from Rubix node
 	did, err := didRequest(pubKeyStr, strconv.Itoa(req.Port))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid request, " + err.Error()})
-		fmt.Println(err)
-		// Add a newline to the response body
-		c.Writer.Write([]byte("\n"))
-		return
-	}
-
-	// Verify the returned public key
-	pubKeyBytes, _ := hex.DecodeString(pubKeyStr)
-	reconstructedPubKey, _ := secp256k1.ParsePubKey(pubKeyBytes)
-	if !publicKey.IsEqual(reconstructedPubKey) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Public key mismatch \n"})
 		// Add a newline to the response body
 		c.Writer.Write([]byte("\n"))
 		return
@@ -659,16 +662,21 @@ func createWalletHandler(c *gin.Context) {
 // @Accept json
 // @Produce json
 // @Param request body ReqToRubixNode true "DID"
-// @Success 200 {object} map[string]string
-// @Failure 400 {object} ErrorResponse
-// @Failure 401 {object} ErrorResponse
+// @Success 200 {object} BasicResponse
+// @Failure 400 {object} BasicResponse
+// @Failure 401 {object} BasicResponse
 // @Security BearerAuth
 // @Param Authorization header string true "Authorization token (Bearer <your_token>)"
 // @Router /register_did [post]
 func registerDIDHandler(c *gin.Context) {
+	basicResponse := BasicResponse{
+		Status: false,
+	}
 	tokenString := c.GetHeader("Authorization")
 	if tokenString == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Token is required"})
+		basicResponse.Message = "Token is required"
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		c.Abort()
 		return
 	}
@@ -683,7 +691,9 @@ func registerDIDHandler(c *gin.Context) {
 	})
 
 	if err != nil || !token.Valid {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
+		basicResponse.Message = "Invalid token " + err.Error()
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		c.Abort()
 		return
 	}
@@ -692,20 +702,25 @@ func registerDIDHandler(c *gin.Context) {
 	claims := token.Claims.(jwt.MapClaims)
 	did, ok := claims["sub"].(string)
 	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token: missing or invalid DID"})
+		basicResponse.Message = "Invalid token: missing or invalid DID"
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 
-	// Optionally, verify the DID exists in the database
+	// verify the DID exists in the database
 	user, err := storage.GetUserByDID(did)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found"})
+		basicResponse.Message = "User not found"
+		c.JSON(http.StatusInternalServerError, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	var req ReqToRubixNode
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input"})
+		basicResponse.Message = "Invalid input"
+		c.JSON(http.StatusBadRequest, basicResponse)
 		// Add a newline to the response body if required
 		c.Writer.Write([]byte("\n"))
 		return
@@ -713,36 +728,45 @@ func registerDIDHandler(c *gin.Context) {
 
 	// Ensure the DID from the token matches the one in the request body
 	if req.DID != did {
-		c.JSON(http.StatusForbidden, gin.H{"error": "DID mismatch"})
+		basicResponse.Message = "DID mismatch"
+		c.JSON(http.StatusForbidden, basicResponse)
 		c.Writer.Write([]byte("\n"))
 		return
 	}
-
-	// // Initialize or retrieve an existing channel for the DID
-	// didChannel, _ := getOrCreateDIDChannel(did)
 
 	response, err := registerDIDRequest(did, strconv.Itoa(user.Port))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": err.Error(),
-		})
+		basicResponse.Message = err.Error()
+		c.JSON(http.StatusInternalServerError, basicResponse)
 		// Add a newline to the response body if required
 		c.Writer.Write([]byte("\n"))
 		return
 	}
 
-	respMsg, err := callSignHandler(response, did)
-	if err != nil {
-		log.Println("failed to call sign handler, err:", err.Error())
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": err.Error(),
-		})
+	respMsg := response["message"].(string)
+	// sign, if the message says 'signature needed'
+	if strings.Contains(respMsg, "Signature needed") {
+		respMsg, err = callSignHandler(response, did)
+		if err != nil {
+			basicResponse.Message = err.Error()
+			c.JSON(http.StatusInternalServerError, basicResponse)
+			// Add a newline to the response body if required
+			c.Writer.Write([]byte("\n"))
+			return
+		}
+	} else {
+		basicResponse.Status = response["status"].(bool)
+		basicResponse.Message = respMsg
+		c.JSON(http.StatusInternalServerError, basicResponse)
 		// Add a newline to the response body if required
 		c.Writer.Write([]byte("\n"))
 		return
 	}
 
-	c.JSON(http.StatusOK, respMsg)
+	// prepare response
+	basicResponse.Status = true
+	basicResponse.Message = respMsg
+	c.JSON(http.StatusOK, basicResponse)
 	// Add a newline to the response body if required
 	c.Writer.Write([]byte("\n"))
 }
@@ -753,16 +777,21 @@ func registerDIDHandler(c *gin.Context) {
 // @Accept json
 // @Produce json
 // @Param request body ReqToRubixNode true "DID"
-// @Success 200 {object} map[string]string
-// @Failure 400 {object} ErrorResponse
-// @Failure 401 {object} ErrorResponse
+// @Success 200 {object} BasicResponse
+// @Failure 400 {object} BasicResponse
+// @Failure 401 {object} BasicResponse
 // @Security BearerAuth
 // @Param Authorization header string true "Authorization token (Bearer <your_token>)"
 // @Router /setup_quorum [post]
 func setupQuorumHandler(c *gin.Context) {
+	basicResponse := BasicResponse{
+		Status: false,
+	}
 	tokenString := c.GetHeader("Authorization")
 	if tokenString == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Token is required"})
+		basicResponse.Message = "Token is required"
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		c.Abort()
 		return
 	}
@@ -777,7 +806,9 @@ func setupQuorumHandler(c *gin.Context) {
 	})
 
 	if err != nil || !token.Valid {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
+		basicResponse.Message = "Invalid token, " + err.Error()
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		c.Abort()
 		return
 	}
@@ -786,20 +817,25 @@ func setupQuorumHandler(c *gin.Context) {
 	claims := token.Claims.(jwt.MapClaims)
 	did, ok := claims["sub"].(string)
 	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token: missing or invalid DID"})
+		basicResponse.Message = "Invalid token: missing or invalid DID"
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	// Optionally, verify the DID exists in the database
 	user, err := storage.GetUserByDID(did)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found"})
+		basicResponse.Message = "User not found, " + err.Error()
+		c.JSON(http.StatusInternalServerError, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	var req ReqToRubixNode
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input"})
+		basicResponse.Message = "Invalid input"
+		c.JSON(http.StatusBadRequest, basicResponse)
 		// Add a newline to the response body if required
 		c.Writer.Write([]byte("\n"))
 		return
@@ -807,21 +843,25 @@ func setupQuorumHandler(c *gin.Context) {
 
 	// Ensure the DID from the token matches the one in the request body
 	if req.DID != did {
-		c.JSON(http.StatusForbidden, gin.H{"error": "DID mismatch"})
+		basicResponse.Message = "DID mismatch"
+		c.JSON(http.StatusForbidden, basicResponse)
 		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	resp, err := setupQuorumRequest(req.DID, strconv.Itoa(user.Port))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": err.Error(),
-		})
+		basicResponse.Message = err.Error()
+		c.JSON(http.StatusInternalServerError, basicResponse)
 		// Add a newline to the response body if required
 		c.Writer.Write([]byte("\n"))
+		return
 	}
 
-	c.JSON(http.StatusOK, resp)
+	// prepare response
+	basicResponse.Status = true
+	basicResponse.Message = resp
+	c.JSON(http.StatusOK, basicResponse)
 	// Add a newline to the response body if required
 	c.Writer.Write([]byte("\n"))
 }
@@ -883,16 +923,21 @@ func setupQuorumRequest(did string, rubixNodePort string) (string, error) {
 // @Accept json
 // @Produce json
 // @Param request body DIDPeerMap true "Peer details"
-// @Success 200 {object} map[string]string
-// @Failure 400 {object} ErrorResponse
-// @Failure 401 {object} ErrorResponse
+// @Success 200 {object} BasicResponse
+// @Failure 400 {object} BasicResponse
+// @Failure 401 {object} BasicResponse
 // @Security BearerAuth
 // @Param Authorization header string true "Authorization token (Bearer <your_token>)"
 // @Router /add_peer [post]
 func addPeerHandler(c *gin.Context) {
+	basicResponse := BasicResponse{
+		Status: false,
+	}
 	tokenString := c.GetHeader("Authorization")
 	if tokenString == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Token is required"})
+		basicResponse.Message = "Token is required"
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		c.Abort()
 		return
 	}
@@ -907,7 +952,9 @@ func addPeerHandler(c *gin.Context) {
 	})
 
 	if err != nil || !token.Valid {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
+		basicResponse.Message = "Invalid token, " + err.Error()
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		c.Abort()
 		return
 	}
@@ -916,20 +963,25 @@ func addPeerHandler(c *gin.Context) {
 	claims := token.Claims.(jwt.MapClaims)
 	did, ok := claims["sub"].(string)
 	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token: missing or invalid DID"})
+		basicResponse.Message = "Invalid token: missing or invalid DID"
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	// Optionally, verify the DID exists in the database
 	user, err := storage.GetUserByDID(did)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found"})
+		basicResponse.Message = "User not found, " + err.Error()
+		c.JSON(http.StatusInternalServerError, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	var req DIDPeerMap
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input"})
+		basicResponse.Message = "Invalid input, " + err.Error()
+		c.JSON(http.StatusBadRequest, basicResponse)
 		// Add a newline to the response body if required
 		c.Writer.Write([]byte("\n"))
 		return
@@ -937,21 +989,25 @@ func addPeerHandler(c *gin.Context) {
 
 	// Ensure the DID from the token matches the one in the request body
 	if req.SelfDID != did {
-		c.JSON(http.StatusForbidden, gin.H{"error": "DID mismatch"})
+		basicResponse.Message = "DID mismatch"
+		c.JSON(http.StatusForbidden, basicResponse)
 		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	resp, err := addPeerRequest(req, strconv.Itoa(user.Port))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": err.Error(),
-		})
+		basicResponse.Message = err.Error()
+		c.JSON(http.StatusInternalServerError, basicResponse)
 		// Add a newline to the response body if required
 		c.Writer.Write([]byte("\n"))
+		return
 	}
 
-	c.JSON(http.StatusOK, resp)
+	// prepare response
+	basicResponse.Status = true
+	basicResponse.Message = resp
+	c.JSON(http.StatusOK, basicResponse)
 	// Add a newline to the response body if required
 	c.Writer.Write([]byte("\n"))
 }
@@ -1009,41 +1065,53 @@ func addPeerRequest(data DIDPeerMap, rubixNodePort string) (string, error) {
 // @Accept json
 // @Produce json
 // @Param request body SignRequest true "Transaction signing request"
-// @Success 200 {object} SignResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 401 {object} ErrorResponse
+// @Success 200 {object} BasicResponse
+// @Failure 400 {object} BasicResponse
+// @Failure 401 {object} BasicResponse
 // @Security BearerAuth
 // @Router /sign [post]
 func signTransactionHandler(c *gin.Context) {
+	basicResponse := BasicResponse{
+		Status: false,
+	}
 	var req SignRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input"})
+		basicResponse.Message = "Invalid input, " + err.Error()
+		c.JSON(http.StatusBadRequest, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	// Decode the Base64 string back to the byte array
 	decodedBytes, err := base64.StdEncoding.DecodeString(req.Data.Hash)
 	if err != nil {
-		fmt.Println("Error decoding Base64 string:", err)
+		basicResponse.Message = "Error decoding Base64 string, " + err.Error()
+		c.JSON(http.StatusInternalServerError, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
-	log.Println("2-decoded bytes:", decodedBytes)
 
 	user, err := storage.GetUserByDID(req.DID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		basicResponse.Message = "User not found, " + err.Error()
+		c.JSON(http.StatusNotFound, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	signature, err := signData(user.PrivateKey.ToECDSA(), decodedBytes)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to sign data"})
+		basicResponse.Message = err.Error()
+		c.JSON(http.StatusInternalServerError, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	// Verify signature
 	if !verifySignature(user.PublicKey, decodedBytes, signature) {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Signature verification failed"})
+		basicResponse.Message = "Signature verification failed"
+		c.JSON(http.StatusInternalServerError, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 
@@ -1057,11 +1125,17 @@ func signTransactionHandler(c *gin.Context) {
 	}
 	resp, err := signResponse(signResp, user.Port)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		basicResponse.Message = err.Error()
+		c.JSON(http.StatusInternalServerError, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 
-	c.JSON(http.StatusOK, resp)
+	// prepare response
+	basicResponse.Status = resp["status"].(bool)
+	basicResponse.Message = resp["message"].(string)
+	basicResponse.Result = resp["result"]
+	c.JSON(http.StatusOK, basicResponse)
 	// Add a newline to the response body if required
 	c.Writer.Write([]byte("\n"))
 }
@@ -1072,13 +1146,6 @@ func callSignHandler(response map[string]interface{}, did string) (string, error
 	hashStr := respResult["hash"].(string)
 	id := respResult["id"].(string)
 	mode := respResult["mode"].(float64)
-
-	// Decode the Base64 string back to the byte array
-	decodedBytes, err := base64.StdEncoding.DecodeString(hashStr)
-	if err != nil {
-		fmt.Println("Error decoding Base64 string:", err)
-	}
-	log.Println("1-decoded bytes:", decodedBytes)
 
 	// prepare sign request
 	signReq := SignRequest{
@@ -1117,7 +1184,7 @@ func callSignHandler(response map[string]interface{}, did string) (string, error
 		log.Printf("Error reading response body: %v", err)
 		return "", err
 	}
-	log.Printf("Raw response from /sign: %s", string(body))
+
 	if len(body) == 0 {
 		return "", fmt.Errorf("empty response from /sign")
 	}
@@ -1146,16 +1213,21 @@ func callSignHandler(response map[string]interface{}, did string) (string, error
 // @Accept json
 // @Produce json
 // @Param request body TxnRequest true "Transaction details"
-// @Success 200 {object} map[string]interface{}
-// @Failure 400 {object} ErrorResponse
-// @Failure 401 {object} ErrorResponse
+// @Success 200 {object} BasicResponse
+// @Failure 400 {object} BasicResponse
+// @Failure 401 {object} BasicResponse
 // @Security BearerAuth
 // @Param Authorization header string true "Authorization token (Bearer <your_token>)"
 // @Router /request_txn [post]
 func requestTransactionHandler(c *gin.Context) {
+	basicResponse := BasicResponse{
+		Status: false,
+	}
 	tokenString := c.GetHeader("Authorization")
 	if tokenString == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Token is required"})
+		basicResponse.Message = "Token is required"
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		c.Abort()
 		return
 	}
@@ -1170,7 +1242,9 @@ func requestTransactionHandler(c *gin.Context) {
 	})
 
 	if err != nil || !token.Valid {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
+		basicResponse.Message = "Invalid token, " + err.Error()
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		c.Abort()
 		return
 	}
@@ -1179,53 +1253,80 @@ func requestTransactionHandler(c *gin.Context) {
 	claims := token.Claims.(jwt.MapClaims)
 	did, ok := claims["sub"].(string)
 	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token: missing or invalid DID"})
+		basicResponse.Message = "Invalid token: missing or invalid DID"
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	// Optionally, verify the DID exists in the database
 	user, err := storage.GetUserByDID(did)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found"})
+		basicResponse.Message = "User not found, " + err.Error()
+		c.JSON(http.StatusInternalServerError, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	var req TxnRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input"})
+		basicResponse.Message = "Invalid input, " + err.Error()
+		c.JSON(http.StatusBadRequest, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	// Ensure the DID from the token matches the one in the request body
 	if req.DID != did {
-		c.JSON(http.StatusForbidden, gin.H{"error": "DID mismatch"})
+		basicResponse.Message = "DID mismatch"
+		c.JSON(http.StatusForbidden, basicResponse)
 		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	jwtToken, err := GenerateJWT(req.DID, req.ReceiverDID, req.RBTAmount)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate JWT"})
+		basicResponse.Message = "Failed to generate JWT, " + err.Error()
+		c.JSON(http.StatusInternalServerError, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	isValid, claims, err := VerifyToken(jwtToken, user.PublicKey.ToECDSA())
 	if !isValid {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": err})
+		basicResponse.Message = err.Error()
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	log.Println("Token claims:", claims)
-	result := SendAuthRequest(jwtToken, strconv.Itoa(user.Port))
+	response := SendAuthRequest(jwtToken, strconv.Itoa(user.Port))
 
-	// sign response
-	respMsg, err := callSignHandler(result, did)
+	respMsg := response["message"].(string)
+	// sign, if the message says 'signature needed'
+	if strings.Contains(respMsg, "Signature needed") {
+		respMsg, err = callSignHandler(response, did)
+		if err != nil {
+			basicResponse.Message = err.Error()
+			c.JSON(http.StatusInternalServerError, basicResponse)
+			// Add a newline to the response body if required
+			c.Writer.Write([]byte("\n"))
+			return
+		}
+	} else {
+		basicResponse.Status = response["status"].(bool)
+		basicResponse.Message = respMsg
+		c.JSON(http.StatusInternalServerError, basicResponse)
+		// Add a newline to the response body if required
+		c.Writer.Write([]byte("\n"))
+		return
+	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"did":    req.DID,
-		"jwt":    jwtToken,
-		"status": respMsg,
-	})
+	// prepare response
+	basicResponse.Status = true
+	basicResponse.Message = respMsg
+	c.JSON(http.StatusOK, basicResponse)
 	// Add a newline to the response body if required
 	c.Writer.Write([]byte("\n"))
 }
@@ -1236,16 +1337,21 @@ func requestTransactionHandler(c *gin.Context) {
 // @Accept json
 // @Produce json
 // @Param did query string true "DID of the user"
-// @Success 200 {object} map[string]interface{}
-// @Failure 400 {object} ErrorResponse
-// @Failure 401 {object} ErrorResponse
+// @Success 200 {object} BasicResponse
+// @Failure 400 {object} BasicResponse
+// @Failure 401 {object} BasicResponse
 // @Security BearerAuth
 // @Param Authorization header string true "Authorization token (Bearer <your_token>)"
 // @Router /request_balance [get]
 func requestBalanceHandler(c *gin.Context) {
+	basicResponse := BasicResponse{
+		Status: false,
+	}
 	tokenString := c.GetHeader("Authorization")
 	if tokenString == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Token is required"})
+		basicResponse.Message = "Token is required"
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		c.Abort()
 		return
 	}
@@ -1260,7 +1366,9 @@ func requestBalanceHandler(c *gin.Context) {
 	})
 
 	if err != nil || !token.Valid {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
+		basicResponse.Message = "Invalid token, " + err.Error()
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		c.Abort()
 		return
 	}
@@ -1269,40 +1377,52 @@ func requestBalanceHandler(c *gin.Context) {
 	claims := token.Claims.(jwt.MapClaims)
 	did, ok := claims["sub"].(string)
 	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token: missing or invalid DID"})
+		basicResponse.Message = "Invalid token: missing or invalid DID"
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	// Optionally, verify the DID exists in the database
 	user, err := storage.GetUserByDID(did)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found"})
+		basicResponse.Message = "User not found"
+		c.JSON(http.StatusInternalServerError, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	userDID := c.Query("did")
 
 	if userDID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing required parameter: did"})
+		basicResponse.Message = "Missing required parameter: did"
+		c.JSON(http.StatusBadRequest, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	// Ensure the DID from the token matches the one in the request body
 	if userDID != did {
-		c.JSON(http.StatusForbidden, gin.H{"error": "DID mismatch"})
+		basicResponse.Message = "DID mismatch"
+		c.JSON(http.StatusForbidden, basicResponse)
 		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	result, err := RequestBalance(did, strconv.Itoa(user.Port))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err})
+		basicResponse.Message = err.Error()
+		c.JSON(http.StatusBadRequest, basicResponse)
 		// Add a newline to the response body if required
 		c.Writer.Write([]byte("\n"))
 		return
 	}
 
-	c.JSON(http.StatusOK, result)
+	// prepare response
+	basicResponse.Status = result["status"].(bool)
+	basicResponse.Message = result["message"].(string)
+	basicResponse.Result = result["account_info"]
+	c.JSON(http.StatusOK, basicResponse)
 	// Add a newline to the response body if required
 	c.Writer.Write([]byte("\n"))
 }
@@ -1313,16 +1433,21 @@ func requestBalanceHandler(c *gin.Context) {
 // @Accept json
 // @Produce json
 // @Param request body GenerateTestRBTRequest true "Request to generate test RBTs"
-// @Success 200 {object} map[string]string
-// @Failure 400 {object} ErrorResponse
-// @Failure 401 {object} ErrorResponse
+// @Success 200 {object} BasicResponse
+// @Failure 400 {object} BasicResponse
+// @Failure 401 {object} BasicResponse
 // @Security BearerAuth
 // @Param Authorization header string true "Authorization token (Bearer <your_token>)"
 // @Router /testrbt/create [post]
 func createTestRBTHandler(c *gin.Context) {
+	basicResponse := BasicResponse{
+		Status: false,
+	}
 	tokenString := c.GetHeader("Authorization")
 	if tokenString == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Token is required"})
+		basicResponse.Message = "Token is required"
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		c.Abort()
 		return
 	}
@@ -1337,7 +1462,9 @@ func createTestRBTHandler(c *gin.Context) {
 	})
 
 	if err != nil || !token.Valid {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
+		basicResponse.Message = "Invalid token"
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		c.Abort()
 		return
 	}
@@ -1346,21 +1473,25 @@ func createTestRBTHandler(c *gin.Context) {
 	claims := token.Claims.(jwt.MapClaims)
 	did, ok := claims["sub"].(string)
 	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token: missing or invalid DID"})
+		basicResponse.Message = "Invalid token: missing or invalid DID"
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	// Optionally, verify the DID exists in the database
 	user, err := storage.GetUserByDID(did)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found"})
+		basicResponse.Message = "User not found, " + err.Error()
+		c.JSON(http.StatusUnauthorized, basicResponse)
 		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	var req GenerateTestRBTRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input"})
+		basicResponse.Message = "Invalid input, " + err.Error()
+		c.JSON(http.StatusBadRequest, basicResponse)
 		// Add a newline to the response body if required
 		c.Writer.Write([]byte("\n"))
 		return
@@ -1368,25 +1499,45 @@ func createTestRBTHandler(c *gin.Context) {
 
 	// Ensure the DID from the token matches the one in the request body
 	if req.DID != did {
-		c.JSON(http.StatusForbidden, gin.H{"error": "DID mismatch"})
+		basicResponse.Message = "DID mismatch"
+		c.JSON(http.StatusForbidden, basicResponse)
 		c.Writer.Write([]byte("\n"))
 		return
 	}
 
-	resp, err := GenerateTestRBT(req, strconv.Itoa(user.Port))
+	response, err := GenerateTestRBT(req, strconv.Itoa(user.Port))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": err.Error(),
-		})
+		basicResponse.Message = err.Error()
+		c.JSON(http.StatusBadRequest, basicResponse)
 		// Add a newline to the response body if required
 		c.Writer.Write([]byte("\n"))
+		return
 	}
-	log.Println("response body:", resp)
 
-	// sign response
-	respMsg, err := callSignHandler(resp, did)
+	respMsg := response["message"].(string)
+	// sign, if the message says 'signature needed'
+	if strings.Contains(respMsg, "Signature needed") {
+		respMsg, err = callSignHandler(response, did)
+		if err != nil {
+			basicResponse.Message = err.Error()
+			c.JSON(http.StatusInternalServerError, basicResponse)
+			// Add a newline to the response body if required
+			c.Writer.Write([]byte("\n"))
+			return
+		}
+	} else {
+		basicResponse.Status = response["status"].(bool)
+		basicResponse.Message = respMsg
+		c.JSON(http.StatusInternalServerError, basicResponse)
+		// Add a newline to the response body if required
+		c.Writer.Write([]byte("\n"))
+		return
+	}
 
-	c.JSON(http.StatusOK, respMsg)
+	// prepare response
+	basicResponse.Status = true
+	basicResponse.Message = respMsg
+	c.JSON(http.StatusOK, basicResponse)
 	// Add a newline to the response body if required
 	c.Writer.Write([]byte("\n"))
 }
@@ -1400,16 +1551,21 @@ func createTestRBTHandler(c *gin.Context) {
 // @Param role query string false "Role in the transaction (e.g., sender, receiver)"
 // @Param startDate query string false "Start date for filtering transactions"
 // @Param endDate query string false "End date for filtering transactions"
-// @Success 200 {object} map[string]interface{}
-// @Failure 400 {object} ErrorResponse
-// @Failure 401 {object} ErrorResponse
+// @Success 200 {object} BasicResponse
+// @Failure 400 {object} BasicResponse
+// @Failure 401 {object} BasicResponse
 // @Security BearerAuth
 // @Param Authorization header string true "Authorization token (Bearer <your_token>)"
 // @Router /txn/by_did [get]
 func getTxnByDIDHandler(c *gin.Context) {
+	basicResponse := BasicResponse{
+		Status: false,
+	}
 	tokenString := c.GetHeader("Authorization")
 	if tokenString == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Token is required"})
+		basicResponse.Message = "Token is required"
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		c.Abort()
 		return
 	}
@@ -1424,7 +1580,9 @@ func getTxnByDIDHandler(c *gin.Context) {
 	})
 
 	if err != nil || !token.Valid {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
+		basicResponse.Message = "Invalid token, " + err.Error()
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		c.Abort()
 		return
 	}
@@ -1433,14 +1591,17 @@ func getTxnByDIDHandler(c *gin.Context) {
 	claims := token.Claims.(jwt.MapClaims)
 	did, ok := claims["sub"].(string)
 	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token: missing or invalid DID"})
+		basicResponse.Message = "Invalid token: missing or invalid DID"
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	// Optionally, verify the DID exists in the database
 	user, err := storage.GetUserByDID(did)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found"})
+		basicResponse.Message = "User nopt found, " + err.Error()
+		c.JSON(http.StatusUnauthorized, basicResponse)
 		c.Writer.Write([]byte("\n"))
 		return
 	}
@@ -1448,13 +1609,16 @@ func getTxnByDIDHandler(c *gin.Context) {
 	userDID := c.Query("did")
 
 	if userDID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing required parameter: did \n"})
+		basicResponse.Message = "Missing required parameter: did"
+		c.JSON(http.StatusInternalServerError, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	// Ensure the DID from the token matches the one in the request body
 	if userDID != did {
-		c.JSON(http.StatusForbidden, gin.H{"error": "DID mismatch"})
+		basicResponse.Message = "DID mismatch"
+		c.JSON(http.StatusForbidden, basicResponse)
 		c.Writer.Write([]byte("\n"))
 		return
 	}
@@ -1465,13 +1629,18 @@ func getTxnByDIDHandler(c *gin.Context) {
 
 	result, err := RequestTxnsByDID(did, role, startDate, endDate, strconv.Itoa(user.Port))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err})
+		basicResponse.Message = err.Error()
+		c.JSON(http.StatusBadRequest, basicResponse)
 		// Add a newline to the response body if required
 		c.Writer.Write([]byte("\n"))
 		return
 	}
 
-	c.JSON(http.StatusOK, result)
+	// prepare response
+	basicResponse.Status = result["status"].(bool)
+	basicResponse.Message = result["message"].(string)
+	basicResponse.Result = result["TxnDetails"]
+	c.JSON(http.StatusOK, basicResponse)
 	// Add a newline to the response body if required
 	c.Writer.Write([]byte("\n"))
 }
@@ -1802,8 +1971,6 @@ func registerDIDRequest(did string, rubixNodePort string) (map[string]interface{
 		return nil, err
 	}
 
-	fmt.Println("response data after unmarshal : ", response)
-
 	respMsg := response["message"].(string)
 	respStatus := response["status"].(bool)
 
@@ -1820,16 +1987,21 @@ func registerDIDRequest(did string, rubixNodePort string) (map[string]interface{
 // @Accept json
 // @Produce json
 // @Param request body ReqToRubixNode true "Request to unpledge RBTs"
-// @Success 200 {object} map[string]string
-// @Failure 400 {object} ErrorResponse
-// @Failure 401 {object} ErrorResponse
+// @Success 200 {object} BasicResponse
+// @Failure 400 {object} BasicResponse
+// @Failure 401 {object} BasicResponse
 // @Security BearerAuth
 // @Param Authorization header string true "Authorization token (Bearer <your_token>)"
 // @Router /rbt/unpledge [post]
 func unpledgeRBTHandler(c *gin.Context) {
+	basicResponse := BasicResponse{
+		Status: false,
+	}
 	tokenString := c.GetHeader("Authorization")
 	if tokenString == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Token is required"})
+		basicResponse.Message = "Token is required"
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		c.Abort()
 		return
 	}
@@ -1844,7 +2016,9 @@ func unpledgeRBTHandler(c *gin.Context) {
 	})
 
 	if err != nil || !token.Valid {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
+		basicResponse.Message = "Invalid token, " + err.Error()
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		c.Abort()
 		return
 	}
@@ -1853,21 +2027,25 @@ func unpledgeRBTHandler(c *gin.Context) {
 	claims := token.Claims.(jwt.MapClaims)
 	did, ok := claims["sub"].(string)
 	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token: missing or invalid DID"})
+		basicResponse.Message = "Invalid token: missing or invalid DID"
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	// Optionally, verify the DID exists in the database
 	user, err := storage.GetUserByDID(did)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found"})
+		basicResponse.Message = "User not found, " + err.Error()
+		c.JSON(http.StatusUnauthorized, basicResponse)
 		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	var req ReqToRubixNode
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input"})
+		basicResponse.Message = "Invalid input, " + err.Error()
+		c.JSON(http.StatusBadRequest, basicResponse)
 		// Add a newline to the response body if required
 		c.Writer.Write([]byte("\n"))
 		return
@@ -1875,21 +2053,25 @@ func unpledgeRBTHandler(c *gin.Context) {
 
 	// Ensure the DID from the token matches the one in the request body
 	if req.DID != did {
-		c.JSON(http.StatusForbidden, gin.H{"error": "DID mismatch"})
+		basicResponse.Message = "DID mismatch"
+		c.JSON(http.StatusForbidden, basicResponse)
 		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	resp, err := unpledgeRBTRequest(req, strconv.Itoa(user.Port))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": err.Error(),
-		})
+		basicResponse.Message = err.Error()
+		c.JSON(http.StatusBadRequest, basicResponse)
 		// Add a newline to the response body if required
 		c.Writer.Write([]byte("\n"))
+		return
 	}
 
-	c.JSON(http.StatusOK, resp)
+	// prepare response
+	basicResponse.Status = true
+	basicResponse.Message = resp
+	c.JSON(http.StatusOK, basicResponse)
 	// Add a newline to the response body if required
 	c.Writer.Write([]byte("\n"))
 }
@@ -1949,16 +2131,21 @@ func unpledgeRBTRequest(data ReqToRubixNode, rubixNodePort string) (string, erro
 // @Accept json
 // @Produce json
 // @Param request body CreateFTRequest true "Fungible token creation details"
-// @Success 200 {object} map[string]string
-// @Failure 400 {object} ErrorResponse
-// @Failure 401 {object} ErrorResponse
+// @Success 200 {object} BasicResponse
+// @Failure 400 {object} BasicResponse
+// @Failure 401 {object} BasicResponse
 // @Security BearerAuth
 // @Param Authorization header string true "Authorization token (Bearer <your_token>)"
 // @Router /create_ft [post]
 func createFTHandler(c *gin.Context) {
+	basicResponse := BasicResponse{
+		Status: false,
+	}
 	tokenString := c.GetHeader("Authorization")
 	if tokenString == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Token is required"})
+		basicResponse.Message = "Token is required"
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		c.Abort()
 		return
 	}
@@ -1973,7 +2160,9 @@ func createFTHandler(c *gin.Context) {
 	})
 
 	if err != nil || !token.Valid {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
+		basicResponse.Message = "Invalid token, " + err.Error()
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		c.Abort()
 		return
 	}
@@ -1982,52 +2171,70 @@ func createFTHandler(c *gin.Context) {
 	claims := token.Claims.(jwt.MapClaims)
 	did, ok := claims["sub"].(string)
 	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token: missing or invalid DID"})
+		basicResponse.Message = "Invalid token: missing or invalid DID"
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	// Optionally, verify the DID exists in the database
 	user, err := storage.GetUserByDID(did)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found"})
+		basicResponse.Message = "User not found, " + err.Error()
+		c.JSON(http.StatusUnauthorized, basicResponse)
 		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	var req CreateFTRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input"})
+		basicResponse.Message = "Invalid input, " + err.Error()
+		c.JSON(http.StatusBadRequest, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	// Ensure the DID from the token matches the one in the request body
 	if req.DID != did {
-		c.JSON(http.StatusForbidden, gin.H{"error": "DID mismatch"})
+		basicResponse.Message = "DID mismatch"
+		c.JSON(http.StatusForbidden, basicResponse)
 		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	response, err := createFTReq(req, strconv.Itoa(user.Port))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": err.Error(),
-		})
-		// Add a newline to the response body if required
-		c.Writer.Write([]byte("\n"))
-	}
-
-	respMsg, err := callSignHandler(response, did)
-	if err != nil {
-		log.Println("failed to call sign handler, err:", err.Error())
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": err.Error(),
-		})
+		basicResponse.Message = err.Error()
+		c.JSON(http.StatusBadRequest, basicResponse)
 		// Add a newline to the response body if required
 		c.Writer.Write([]byte("\n"))
 		return
 	}
 
-	c.JSON(http.StatusOK, respMsg)
+	respMsg := response["message"].(string)
+	// sign, if the message says 'signature needed'
+	if strings.Contains(respMsg, "Signature needed") {
+		respMsg, err = callSignHandler(response, did)
+		if err != nil {
+			basicResponse.Message = err.Error()
+			c.JSON(http.StatusInternalServerError, basicResponse)
+			// Add a newline to the response body if required
+			c.Writer.Write([]byte("\n"))
+			return
+		}
+	} else {
+		basicResponse.Status = response["status"].(bool)
+		basicResponse.Message = respMsg
+		c.JSON(http.StatusInternalServerError, basicResponse)
+		// Add a newline to the response body if required
+		c.Writer.Write([]byte("\n"))
+		return
+	}
+
+	// prepare response
+	basicResponse.Status = true
+	basicResponse.Message = respMsg
+	c.JSON(http.StatusOK, basicResponse)
 	// Add a newline to the response body if required
 	c.Writer.Write([]byte("\n"))
 }
@@ -2086,16 +2293,21 @@ func createFTReq(data CreateFTRequest, rubixNodePort string) (map[string]interfa
 // @Accept json
 // @Produce json
 // @Param request body TransferFTReq true "Fungible token transfer details"
-// @Success 200 {object} map[string]string
-// @Failure 400 {object} ErrorResponse
-// @Failure 401 {object} ErrorResponse
+// @Success 200 {object} BasicResponse
+// @Failure 400 {object} BasicResponse
+// @Failure 401 {object} BasicResponse
 // @Security BearerAuth
 // @Param Authorization header string true "Authorization token (Bearer <your_token>)"
 // @Router /transfer_ft [post]
 func transferFTHandler(c *gin.Context) {
+	basicResponse := BasicResponse{
+		Status: false,
+	}
 	tokenString := c.GetHeader("Authorization")
 	if tokenString == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Token is required"})
+		basicResponse.Message = "Token is required"
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		c.Abort()
 		return
 	}
@@ -2110,7 +2322,9 @@ func transferFTHandler(c *gin.Context) {
 	})
 
 	if err != nil || !token.Valid {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
+		basicResponse.Message = "Invalid token, " + err.Error()
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		c.Abort()
 		return
 	}
@@ -2119,53 +2333,70 @@ func transferFTHandler(c *gin.Context) {
 	claims := token.Claims.(jwt.MapClaims)
 	did, ok := claims["sub"].(string)
 	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token: missing or invalid DID"})
+		basicResponse.Message = "Invalid token: missing or invalid DID"
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	// Optionally, verify the DID exists in the database
 	user, err := storage.GetUserByDID(did)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found"})
+		basicResponse.Message = "User not found, " + err.Error()
+		c.JSON(http.StatusUnauthorized, basicResponse)
 		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	var req TransferFTReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input"})
+		basicResponse.Message = "Invalid input, " + err.Error()
+		c.JSON(http.StatusBadRequest, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	// Ensure the DID from the token matches the one in the request body
 	if req.Sender != did {
-		c.JSON(http.StatusForbidden, gin.H{"error": "DID mismatch"})
+		basicResponse.Message = "DID mismatch"
+		c.JSON(http.StatusForbidden, basicResponse)
 		c.Writer.Write([]byte("\n"))
 		return
 	}
 
-	resp, err := transferFTRequest(req, strconv.Itoa(user.Port))
+	response, err := transferFTRequest(req, strconv.Itoa(user.Port))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": err.Error(),
-		})
-		// Add a newline to the response body if required
-		c.Writer.Write([]byte("\n"))
-	}
-
-	// sign response
-	respMsg, err := callSignHandler(resp, did)
-	if err != nil {
-		log.Println("failed to call sign handler, err:", err.Error())
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": err.Error(),
-		})
+		basicResponse.Message = err.Error()
+		c.JSON(http.StatusBadRequest, basicResponse)
 		// Add a newline to the response body if required
 		c.Writer.Write([]byte("\n"))
 		return
 	}
 
-	c.JSON(http.StatusOK, respMsg)
+	respMsg := response["message"].(string)
+	// sign, if the message says 'signature needed'
+	if strings.Contains(respMsg, "Signature needed") {
+		respMsg, err = callSignHandler(response, did)
+		if err != nil {
+			basicResponse.Message = err.Error()
+			c.JSON(http.StatusInternalServerError, basicResponse)
+			// Add a newline to the response body if required
+			c.Writer.Write([]byte("\n"))
+			return
+		}
+	} else {
+		basicResponse.Status = response["status"].(bool)
+		basicResponse.Message = respMsg
+		c.JSON(http.StatusInternalServerError, basicResponse)
+		// Add a newline to the response body if required
+		c.Writer.Write([]byte("\n"))
+		return
+	}
+
+	// prepare response
+	basicResponse.Status = true
+	basicResponse.Message = respMsg
+	c.JSON(http.StatusOK, basicResponse)
 	// Add a newline to the response body if required
 	c.Writer.Write([]byte("\n"))
 }
@@ -2224,16 +2455,21 @@ func transferFTRequest(data TransferFTReq, rubixNodePort string) (map[string]int
 // @Accept json
 // @Produce json
 // @Param did query string true "DID of the user"
-// @Success 200 {object} map[string]interface{}
-// @Failure 400 {object} ErrorResponse
-// @Failure 401 {object} ErrorResponse
+// @Success 200 {object} BasicResponse
+// @Failure 400 {object} BasicResponse
+// @Failure 401 {object} BasicResponse
 // @Security BearerAuth
 // @Param Authorization header string true "Authorization token (Bearer <your_token>)"
 // @Router /get_all_ft [get]
 func getAllFTHandler(c *gin.Context) {
+	basicResponse := BasicResponse{
+		Status: false,
+	}
 	tokenString := c.GetHeader("Authorization")
 	if tokenString == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Token is required"})
+		basicResponse.Message = "Token is required"
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		c.Abort()
 		return
 	}
@@ -2248,7 +2484,9 @@ func getAllFTHandler(c *gin.Context) {
 	})
 
 	if err != nil || !token.Valid {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
+		basicResponse.Message = "Invalid token, " + err.Error()
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		c.Abort()
 		return
 	}
@@ -2257,14 +2495,17 @@ func getAllFTHandler(c *gin.Context) {
 	claims := token.Claims.(jwt.MapClaims)
 	did, ok := claims["sub"].(string)
 	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token: missing or invalid DID"})
+		basicResponse.Message = "Invalid token: missing or invalid DID"
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	// Optionally, verify the DID exists in the database
 	user, err := storage.GetUserByDID(did)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found"})
+		basicResponse.Message = "User not found, " + err.Error()
+		c.JSON(http.StatusUnauthorized, basicResponse)
 		c.Writer.Write([]byte("\n"))
 		return
 	}
@@ -2272,27 +2513,33 @@ func getAllFTHandler(c *gin.Context) {
 	userDID := c.Query("did")
 
 	if userDID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing required parameter: did"})
+		basicResponse.Message = "Missing required parameter: did"
+		c.JSON(http.StatusBadRequest, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	// Ensure the DID from the token matches the one in the request body
 	if userDID != did {
-		c.JSON(http.StatusForbidden, gin.H{"error": "DID mismatch"})
+		basicResponse.Message = "DID mismatch"
+		c.JSON(http.StatusForbidden, basicResponse)
 		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	resp, err := getAllFTRequest(did, strconv.Itoa(user.Port))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": err.Error(),
-		})
+		basicResponse.Message = err.Error()
+		c.JSON(http.StatusBadRequest, basicResponse)
 		// Add a newline to the response body if required
 		c.Writer.Write([]byte("\n"))
 	}
 
-	c.JSON(http.StatusOK, resp)
+	// prepare response
+	basicResponse.Status = resp["status"].(bool)
+	basicResponse.Message = resp["message"].(string)
+	basicResponse.Result = resp["ft_info"]
+	c.JSON(http.StatusOK, basicResponse)
 	// Add a newline to the response body if required
 	c.Writer.Write([]byte("\n"))
 }
@@ -2337,16 +2584,21 @@ func getAllFTRequest(did string, rubixNodePort string) (map[string]interface{}, 
 // @Accept json
 // @Produce json
 // @Param tokenID query string true "Token ID"
-// @Success 200 {object} map[string]interface{}
-// @Failure 400 {object} ErrorResponse
-// @Failure 401 {object} ErrorResponse
+// @Success 200 {object} BasicResponse
+// @Failure 400 {object} BasicResponse
+// @Failure 401 {object} BasicResponse
 // @Security BearerAuth
 // @Param Authorization header string true "Authorization token (Bearer <your_token>)"
 // @Router /get_ft_chain [get]
 func getFTChainHandler(c *gin.Context) {
+	basicResponse := BasicResponse{
+		Status: false,
+	}
 	tokenString := c.GetHeader("Authorization")
 	if tokenString == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Token is required"})
+		basicResponse.Message = "Token is required"
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		c.Abort()
 		return
 	}
@@ -2361,7 +2613,9 @@ func getFTChainHandler(c *gin.Context) {
 	})
 
 	if err != nil || !token.Valid {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
+		basicResponse.Message = "Invalid token, " + err.Error()
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		c.Abort()
 		return
 	}
@@ -2370,14 +2624,17 @@ func getFTChainHandler(c *gin.Context) {
 	claims := token.Claims.(jwt.MapClaims)
 	did, ok := claims["sub"].(string)
 	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token: missing or invalid DID"})
+		basicResponse.Message = "Invalid token: missing or invalid DID"
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	// Optionally, verify the DID exists in the database
 	user, err := storage.GetUserByDID(did)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found"})
+		basicResponse.Message = "User not found, " + err.Error()
+		c.JSON(http.StatusUnauthorized, basicResponse)
 		c.Writer.Write([]byte("\n"))
 		return
 	}
@@ -2385,12 +2642,15 @@ func getFTChainHandler(c *gin.Context) {
 	userDID := c.Query("did")
 
 	if userDID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing required parameter: did"})
+		basicResponse.Message = "Missing required parameter: did"
+		c.JSON(http.StatusBadRequest, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 	// Ensure the DID from the token matches the one in the request body
 	if userDID != did {
-		c.JSON(http.StatusForbidden, gin.H{"error": "DID mismatch"})
+		basicResponse.Message = "DID mismatch"
+		c.JSON(http.StatusForbidden, basicResponse)
 		c.Writer.Write([]byte("\n"))
 		return
 	}
@@ -2398,20 +2658,25 @@ func getFTChainHandler(c *gin.Context) {
 	tokenID := c.Query("tokenID")
 
 	if tokenID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing required parameter: tokenID"})
+		basicResponse.Message = "Missing required parameter: tokenID"
+		c.JSON(http.StatusBadRequest, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	resp, err := getFTChainRequest(tokenID, strconv.Itoa(user.Port))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": err.Error(),
-		})
+		basicResponse.Message = err.Error()
+		c.JSON(http.StatusBadRequest, basicResponse)
 		// Add a newline to the response body if required
 		c.Writer.Write([]byte("\n"))
 	}
 
-	c.JSON(http.StatusOK, resp)
+	//prepare response
+	basicResponse.Status = resp["status"].(bool)
+	basicResponse.Message = resp["message"].(string)
+	basicResponse.Result = resp["TokenChainData"]
+	c.JSON(http.StatusOK, basicResponse)
 	// Add a newline to the response body if required
 	c.Writer.Write([]byte("\n"))
 }
@@ -2458,16 +2723,21 @@ func getFTChainRequest(tokenID string, rubixNodePort string) (map[string]interfa
 // @Accept json
 // @Produce json
 // @Param request body CreateNFTRequest true "NFT creation details"
-// @Success 200 {object} map[string]string
-// @Failure 400 {object} ErrorResponse
-// @Failure 401 {object} ErrorResponse
+// @Success 200 {object} BasicResponse
+// @Failure 400 {object} BasicResponse
+// @Failure 401 {object} BasicResponse
 // @Security BearerAuth
 // @Param Authorization header string true "Authorization token (Bearer <your_token>)"
 // @Router /create_nft [post]
 func createNFTHandler(c *gin.Context) {
+	basicResponse := BasicResponse{
+		Status: false,
+	}
 	tokenString := c.GetHeader("Authorization")
 	if tokenString == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Token is required"})
+		basicResponse.Message = "Token is required"
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		c.Abort()
 		return
 	}
@@ -2482,7 +2752,9 @@ func createNFTHandler(c *gin.Context) {
 	})
 
 	if err != nil || !token.Valid {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
+		basicResponse.Message = "Invalid token, " + err.Error()
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		c.Abort()
 		return
 	}
@@ -2491,40 +2763,49 @@ func createNFTHandler(c *gin.Context) {
 	claims := token.Claims.(jwt.MapClaims)
 	did, ok := claims["sub"].(string)
 	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token: missing or invalid DID"})
+		basicResponse.Message = "Invalid token: missing or invalid DID"
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	// Optionally, verify the DID exists in the database
 	user, err := storage.GetUserByDID(did)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found"})
+		basicResponse.Message = "User not found, " + err.Error()
+		c.JSON(http.StatusUnauthorized, basicResponse)
 		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	var req CreateNFTRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input"})
+		basicResponse.Message = "Invalid input, " + err.Error()
+		c.JSON(http.StatusBadRequest, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 	// Ensure the DID from the token matches the one in the request body
 	if req.DID != did {
-		c.JSON(http.StatusForbidden, gin.H{"error": "DID mismatch"})
+		basicResponse.Message = "DID mismatch"
+		c.JSON(http.StatusForbidden, basicResponse)
 		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	resp, err := createNFTReq(req, strconv.Itoa(user.Port))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": err.Error(),
-		})
+		basicResponse.Message = err.Error()
+		c.JSON(http.StatusBadRequest, basicResponse)
 		// Add a newline to the response body if required
 		c.Writer.Write([]byte("\n"))
+		return
 	}
 
-	c.JSON(http.StatusOK, resp)
+	// prepare response
+	basicResponse.Status = true
+	basicResponse.Message = resp
+	c.JSON(http.StatusOK, basicResponse)
 	// Add a newline to the response body if required
 	c.Writer.Write([]byte("\n"))
 }
@@ -2635,16 +2916,21 @@ func createNFTReq(data CreateNFTRequest, rubixNodePort string) (string, error) {
 // @Accept json
 // @Produce json
 // @Param request body SubscribeNFTRequest true "NFT subscription details"
-// @Success 200 {object} map[string]string
-// @Failure 400 {object} ErrorResponse
-// @Failure 401 {object} ErrorResponse
+// @Success 200 {object} BasicResponse
+// @Failure 400 {object} BasicResponse
+// @Failure 401 {object} BasicResponse
 // @Security BearerAuth
 // @Param Authorization header string true "Authorization token (Bearer <your_token>)"
 // @Router /subscribe_nft [post]
 func subscribeNFTHandler(c *gin.Context) {
+	basicResponse := BasicResponse{
+		Status: false,
+	}
 	tokenString := c.GetHeader("Authorization")
 	if tokenString == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Token is required"})
+		basicResponse.Message = "Token is required"
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		c.Abort()
 		return
 	}
@@ -2659,7 +2945,9 @@ func subscribeNFTHandler(c *gin.Context) {
 	})
 
 	if err != nil || !token.Valid {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
+		basicResponse.Message = "Invalid token, " + err.Error()
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		c.Abort()
 		return
 	}
@@ -2668,41 +2956,50 @@ func subscribeNFTHandler(c *gin.Context) {
 	claims := token.Claims.(jwt.MapClaims)
 	did, ok := claims["sub"].(string)
 	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token: missing or invalid DID"})
+		basicResponse.Message = "Invalid token: missing or invalid DID"
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	// Optionally, verify the DID exists in the database
 	user, err := storage.GetUserByDID(did)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found"})
+		basicResponse.Message = "User not found, " + err.Error()
+		c.JSON(http.StatusUnauthorized, basicResponse)
 		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	var req SubscribeNFTRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input"})
+		basicResponse.Message = "Invalid input, " + err.Error()
+		c.JSON(http.StatusBadRequest, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	// Ensure the DID from the token matches the one in the request body
 	if req.DID != did {
-		c.JSON(http.StatusForbidden, gin.H{"error": "DID mismatch"})
+		basicResponse.Message = "DID mismatch"
+		c.JSON(http.StatusForbidden, basicResponse)
 		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	resp, err := subscribeNFTRequest(req.NFT, strconv.Itoa(user.Port))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": err.Error(),
-		})
+		basicResponse.Message = err.Error()
+		c.JSON(http.StatusBadRequest, basicResponse)
 		// Add a newline to the response body if required
 		c.Writer.Write([]byte("\n"))
+		return
 	}
 
-	c.JSON(http.StatusOK, resp)
+	// preapre response
+	basicResponse.Status = true
+	basicResponse.Message = resp
+	c.JSON(http.StatusOK, basicResponse)
 	// Add a newline to the response body if required
 	c.Writer.Write([]byte("\n"))
 }
@@ -2763,16 +3060,21 @@ func subscribeNFTRequest(nft string, rubixNodePort string) (string, error) {
 // @Accept json
 // @Produce json
 // @Param request body DeployNFTRequest true "NFT deployment details"
-// @Success 200 {object} map[string]string
-// @Failure 400 {object} ErrorResponse
-// @Failure 401 {object} ErrorResponse
+// @Success 200 {object} BasicResponse
+// @Failure 400 {object} BasicResponse
+// @Failure 401 {object} BasicResponse
 // @Security BearerAuth
 // @Param Authorization header string true "Authorization token (Bearer <your_token>)"
 // @Router /deploy_nft [post]
 func deployNFTHandler(c *gin.Context) {
+	basicResponse := BasicResponse{
+		Status: false,
+	}
 	tokenString := c.GetHeader("Authorization")
 	if tokenString == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Token is required"})
+		basicResponse.Message = "Token is required"
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		c.Abort()
 		return
 	}
@@ -2787,7 +3089,9 @@ func deployNFTHandler(c *gin.Context) {
 	})
 
 	if err != nil || !token.Valid {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
+		basicResponse.Message = "Invalid token, " + err.Error()
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		c.Abort()
 		return
 	}
@@ -2796,53 +3100,70 @@ func deployNFTHandler(c *gin.Context) {
 	claims := token.Claims.(jwt.MapClaims)
 	did, ok := claims["sub"].(string)
 	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token: missing or invalid DID"})
+		basicResponse.Message = "Invalid token: missing or invalid DID"
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	// Optionally, verify the DID exists in the database
 	user, err := storage.GetUserByDID(did)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found"})
+		basicResponse.Message = "User not found, " + err.Error()
+		c.JSON(http.StatusUnauthorized, basicResponse)
 		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	var req DeployNFTRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input"})
+		basicResponse.Message = "Invalid input, " + err.Error()
+		c.JSON(http.StatusBadRequest, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	// Ensure the DID from the token matches the one in the request body
 	if req.DID != did {
-		c.JSON(http.StatusForbidden, gin.H{"error": "DID mismatch"})
+		basicResponse.Message = "DID mismatch"
+		c.JSON(http.StatusForbidden, basicResponse)
 		c.Writer.Write([]byte("\n"))
 		return
 	}
 
-	resp, err := deployNFTRequest(req, strconv.Itoa(user.Port))
+	response, err := deployNFTRequest(req, strconv.Itoa(user.Port))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": err.Error(),
-		})
-		// Add a newline to the response body if required
-		c.Writer.Write([]byte("\n"))
-	}
-
-	// sign response
-	respMsg, err := callSignHandler(resp, did)
-	if err != nil {
-		log.Println("failed to call sign handler, err:", err.Error())
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": err.Error(),
-		})
+		basicResponse.Message = err.Error()
+		c.JSON(http.StatusInternalServerError, basicResponse)
 		// Add a newline to the response body if required
 		c.Writer.Write([]byte("\n"))
 		return
 	}
 
-	c.JSON(http.StatusOK, respMsg)
+	respMsg := response["message"].(string)
+	// sign, if the message says 'signature needed'
+	if strings.Contains(respMsg, "Signature needed") {
+		respMsg, err = callSignHandler(response, did)
+		if err != nil {
+			basicResponse.Message = err.Error()
+			c.JSON(http.StatusInternalServerError, basicResponse)
+			// Add a newline to the response body if required
+			c.Writer.Write([]byte("\n"))
+			return
+		}
+	} else {
+		basicResponse.Status = response["status"].(bool)
+		basicResponse.Message = respMsg
+		c.JSON(http.StatusInternalServerError, basicResponse)
+		// Add a newline to the response body if required
+		c.Writer.Write([]byte("\n"))
+		return
+	}
+
+	// prepare response
+	basicResponse.Status = true
+	basicResponse.Message = respMsg
+	c.JSON(http.StatusOK, basicResponse)
 	// Add a newline to the response body if required
 	c.Writer.Write([]byte("\n"))
 }
@@ -2901,16 +3222,21 @@ func deployNFTRequest(data DeployNFTRequest, rubixNodePort string) (map[string]i
 // @Accept json
 // @Produce json
 // @Param request body ExecuteNFTRequest true "NFT execution details"
-// @Success 200 {object} map[string]string
-// @Failure 400 {object} ErrorResponse
-// @Failure 401 {object} ErrorResponse
+// @Success 200 {object} BasicResponse
+// @Failure 400 {object} BasicResponse
+// @Failure 401 {object} BasicResponse
 // @Security BearerAuth
 // @Param Authorization header string true "Authorization token (Bearer <your_token>)"
 // @Router /execute_nft [post]
 func executeNFTHandler(c *gin.Context) {
+	basicResponse := BasicResponse{
+		Status: false,
+	}
 	tokenString := c.GetHeader("Authorization")
 	if tokenString == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Token is required"})
+		basicResponse.Message = "Token is required"
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		c.Abort()
 		return
 	}
@@ -2925,7 +3251,9 @@ func executeNFTHandler(c *gin.Context) {
 	})
 
 	if err != nil || !token.Valid {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
+		basicResponse.Message = "Invalid token, " + err.Error()
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		c.Abort()
 		return
 	}
@@ -2934,53 +3262,70 @@ func executeNFTHandler(c *gin.Context) {
 	claims := token.Claims.(jwt.MapClaims)
 	did, ok := claims["sub"].(string)
 	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token: missing or invalid DID"})
+		basicResponse.Message = "Invalid token: missing or invalid DID"
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	// Optionally, verify the DID exists in the database
 	user, err := storage.GetUserByDID(did)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found"})
+		basicResponse.Message = "User not found, " + err.Error()
+		c.JSON(http.StatusUnauthorized, basicResponse)
 		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	var req ExecuteNFTRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input"})
+		basicResponse.Message = "Invalid input, " + err.Error()
+		c.JSON(http.StatusBadRequest, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	// Ensure the DID from the token matches the one in the request body
 	if req.DID != did {
-		c.JSON(http.StatusForbidden, gin.H{"error": "DID mismatch"})
+		basicResponse.Message = "DID mismatch"
+		c.JSON(http.StatusForbidden, basicResponse)
 		c.Writer.Write([]byte("\n"))
 		return
 	}
 
-	resp, err := executeNFTRequest(req, strconv.Itoa(user.Port))
+	response, err := executeNFTRequest(req, strconv.Itoa(user.Port))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": err.Error(),
-		})
-		// Add a newline to the response body if required
-		c.Writer.Write([]byte("\n"))
-	}
-
-	// sign response
-	respMsg, err := callSignHandler(resp, did)
-	if err != nil {
-		log.Println("failed to call sign handler, err:", err.Error())
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": err.Error(),
-		})
+		basicResponse.Message = err.Error()
+		c.JSON(http.StatusBadRequest, basicResponse)
 		// Add a newline to the response body if required
 		c.Writer.Write([]byte("\n"))
 		return
 	}
 
-	c.JSON(http.StatusOK, respMsg)
+	respMsg := response["message"].(string)
+	// sign, if the message says 'signature needed'
+	if strings.Contains(respMsg, "Signature needed") {
+		respMsg, err = callSignHandler(response, did)
+		if err != nil {
+			basicResponse.Message = err.Error()
+			c.JSON(http.StatusInternalServerError, basicResponse)
+			// Add a newline to the response body if required
+			c.Writer.Write([]byte("\n"))
+			return
+		}
+	} else {
+		basicResponse.Status = response["status"].(bool)
+		basicResponse.Message = respMsg
+		c.JSON(http.StatusInternalServerError, basicResponse)
+		// Add a newline to the response body if required
+		c.Writer.Write([]byte("\n"))
+		return
+	}
+
+	// prepare response
+	basicResponse.Status = true
+	basicResponse.Message = respMsg
+	c.JSON(http.StatusOK, basicResponse)
 	// Add a newline to the response body if required
 	c.Writer.Write([]byte("\n"))
 }
@@ -3039,16 +3384,21 @@ func executeNFTRequest(data ExecuteNFTRequest, rubixNodePort string) (map[string
 // @Accept json
 // @Produce json
 // @Param nft query string true "NFT ID"
-// @Success 200 {object} map[string]interface{}
-// @Failure 400 {object} ErrorResponse
-// @Failure 401 {object} ErrorResponse
+// @Success 200 {object} BasicResponse
+// @Failure 400 {object} BasicResponse
+// @Failure 401 {object} BasicResponse
 // @Security BearerAuth
 // @Param Authorization header string true "Authorization token (Bearer <your_token>)"
 // @Router /get_nft [get]
 func getNFTHandler(c *gin.Context) {
+	basicResponse := BasicResponse{
+		Status: false,
+	}
 	tokenString := c.GetHeader("Authorization")
 	if tokenString == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Token is required"})
+		basicResponse.Message = "Token is required"
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		c.Abort()
 		return
 	}
@@ -3063,7 +3413,9 @@ func getNFTHandler(c *gin.Context) {
 	})
 
 	if err != nil || !token.Valid {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
+		basicResponse.Message = "Invalid token, " + err.Error()
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		c.Abort()
 		return
 	}
@@ -3072,14 +3424,17 @@ func getNFTHandler(c *gin.Context) {
 	claims := token.Claims.(jwt.MapClaims)
 	did, ok := claims["sub"].(string)
 	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token: missing or invalid DID"})
+		basicResponse.Message = "Invalid token: missing or invalid DID"
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	// Optionally, verify the DID exists in the database
 	user, err := storage.GetUserByDID(did)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found"})
+		basicResponse.Message = "User not found, " + err.Error()
+		c.JSON(http.StatusUnauthorized, basicResponse)
 		c.Writer.Write([]byte("\n"))
 		return
 	}
@@ -3087,13 +3442,16 @@ func getNFTHandler(c *gin.Context) {
 	userDID := c.Query("did")
 
 	if userDID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing required parameter: did"})
+		basicResponse.Message = "Missing required parameter: did"
+		c.JSON(http.StatusBadRequest, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	// Ensure the DID from the token matches the one in the request body
 	if userDID != did {
-		c.JSON(http.StatusForbidden, gin.H{"error": "DID mismatch"})
+		basicResponse.Message = "DID mismatch"
+		c.JSON(http.StatusForbidden, basicResponse)
 		c.Writer.Write([]byte("\n"))
 		return
 	}
@@ -3101,20 +3459,26 @@ func getNFTHandler(c *gin.Context) {
 	nft := c.Query("nft")
 
 	if nft == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing required parameter: did"})
+		basicResponse.Message = "Missing required parameter: nft"
+		c.JSON(http.StatusBadRequest, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	resp, err := getNFTRequest(nft, strconv.Itoa(user.Port))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": err.Error(),
-		})
+		basicResponse.Message = err.Error()
+		c.JSON(http.StatusInternalServerError, basicResponse)
 		// Add a newline to the response body if required
 		c.Writer.Write([]byte("\n"))
+		return
 	}
 
-	c.JSON(http.StatusOK, resp)
+	// prepare response
+	basicResponse.Status = resp["status"].(bool)
+	basicResponse.Message = resp["message"].(string)
+	basicResponse.Result = resp["result"]
+	c.JSON(http.StatusOK, basicResponse)
 	// Add a newline to the response body if required
 	c.Writer.Write([]byte("\n"))
 }
@@ -3159,16 +3523,21 @@ func getNFTRequest(nft string, rubixNodePort string) (map[string]interface{}, er
 // @Accept json
 // @Produce json
 // @Param nft query string true "NFT ID"
-// @Success 200 {object} map[string]interface{}
-// @Failure 400 {object} ErrorResponse
-// @Failure 401 {object} ErrorResponse
+// @Success 200 {object} BasicResponse
+// @Failure 400 {object} BasicResponse
+// @Failure 401 {object} BasicResponse
 // @Security BearerAuth
 // @Param Authorization header string true "Authorization token (Bearer <your_token>)"
 // @Router /get_nft_chain [get]
 func getNFTChainHandler(c *gin.Context) {
+	basicResponse := BasicResponse{
+		Status: false,
+	}
 	tokenString := c.GetHeader("Authorization")
 	if tokenString == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Token is required"})
+		basicResponse.Message = "Token is required"
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		c.Abort()
 		return
 	}
@@ -3183,7 +3552,9 @@ func getNFTChainHandler(c *gin.Context) {
 	})
 
 	if err != nil || !token.Valid {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
+		basicResponse.Message = "Invalid token, " + err.Error()
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		c.Abort()
 		return
 	}
@@ -3192,14 +3563,17 @@ func getNFTChainHandler(c *gin.Context) {
 	claims := token.Claims.(jwt.MapClaims)
 	did, ok := claims["sub"].(string)
 	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token: missing or invalid DID"})
+		basicResponse.Message = "Invalid token: missing or invalid DID"
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	// Optionally, verify the DID exists in the database
 	user, err := storage.GetUserByDID(did)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found"})
+		basicResponse.Message = "User not found, " + err.Error()
+		c.JSON(http.StatusUnauthorized, basicResponse)
 		c.Writer.Write([]byte("\n"))
 		return
 	}
@@ -3207,13 +3581,16 @@ func getNFTChainHandler(c *gin.Context) {
 	userDID := c.Query("did")
 
 	if userDID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing required parameter: did"})
+		basicResponse.Message = "Missing required parameter: did"
+		c.JSON(http.StatusBadRequest, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	// Ensure the DID from the token matches the one in the request body
 	if userDID != did {
-		c.JSON(http.StatusForbidden, gin.H{"error": "DID mismatch"})
+		basicResponse.Message = "DID mismatch"
+		c.JSON(http.StatusForbidden, basicResponse)
 		c.Writer.Write([]byte("\n"))
 		return
 	}
@@ -3221,7 +3598,9 @@ func getNFTChainHandler(c *gin.Context) {
 	nft := c.Query("nft")
 
 	if nft == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing required parameter: tokenID"})
+		basicResponse.Message = "Missing required parameter: tokenID"
+		c.JSON(http.StatusBadRequest, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 
@@ -3229,14 +3608,18 @@ func getNFTChainHandler(c *gin.Context) {
 
 	resp, err := getNFTChainRequest(nft, latest, strconv.Itoa(user.Port))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": err.Error(),
-		})
+		basicResponse.Message = err.Error()
+		c.JSON(http.StatusBadRequest, basicResponse)
 		// Add a newline to the response body if required
 		c.Writer.Write([]byte("\n"))
+		return
 	}
 
-	c.JSON(http.StatusOK, resp)
+	//prepare response
+	basicResponse.Status = resp["status"].(bool)
+	basicResponse.Message = resp["message"].(string)
+	basicResponse.Result = resp["NFTDataReply"]
+	c.JSON(http.StatusOK, basicResponse)
 	// Add a newline to the response body if required
 	c.Writer.Write([]byte("\n"))
 }
@@ -3281,16 +3664,21 @@ func getNFTChainRequest(nft string, latest string, rubixNodePort string) (map[st
 // @Accept json
 // @Produce json
 // @Param did query string true "DID of the user"
-// @Success 200 {object} map[string]interface{}
-// @Failure 400 {object} ErrorResponse
-// @Failure 401 {object} ErrorResponse
+// @Success 200 {object} BasicResponse
+// @Failure 400 {object} BasicResponse
+// @Failure 401 {object} BasicResponse
 // @Security BearerAuth
 // @Param Authorization header string true "Authorization token (Bearer <your_token>)"
 // @Router /get_all_nft [get]
 func getAllNFTHandler(c *gin.Context) {
+	basicResponse := BasicResponse{
+		Status: false,
+	}
 	tokenString := c.GetHeader("Authorization")
 	if tokenString == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Token is required"})
+		basicResponse.Message = "Token is required"
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		c.Abort()
 		return
 	}
@@ -3305,7 +3693,9 @@ func getAllNFTHandler(c *gin.Context) {
 	})
 
 	if err != nil || !token.Valid {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
+		basicResponse.Message = "Invalid token, " + err.Error()
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		c.Abort()
 		return
 	}
@@ -3314,14 +3704,17 @@ func getAllNFTHandler(c *gin.Context) {
 	claims := token.Claims.(jwt.MapClaims)
 	did, ok := claims["sub"].(string)
 	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token: missing or invalid DID"})
+		basicResponse.Message = "Invalid token: missing or invalid DID"
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	// Optionally, verify the DID exists in the database
 	user, err := storage.GetUserByDID(did)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found"})
+		basicResponse.Message = "User not found, " + err.Error()
+		c.JSON(http.StatusUnauthorized, basicResponse)
 		c.Writer.Write([]byte("\n"))
 		return
 	}
@@ -3329,27 +3722,34 @@ func getAllNFTHandler(c *gin.Context) {
 	userDID := c.Query("did")
 
 	if userDID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing required parameter: did"})
+		basicResponse.Message = "Missing required parameter: did"
+		c.JSON(http.StatusBadRequest, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	// Ensure the DID from the token matches the one in the request body
 	if userDID != did {
-		c.JSON(http.StatusForbidden, gin.H{"error": "DID mismatch"})
+		basicResponse.Message = "DID mismatch"
+		c.JSON(http.StatusForbidden, basicResponse)
 		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	resp, err := getAllNFTRequest(did, strconv.Itoa(user.Port))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": err.Error(),
-		})
+		basicResponse.Message = err.Error()
+		c.JSON(http.StatusBadRequest, basicResponse)
 		// Add a newline to the response body if required
 		c.Writer.Write([]byte("\n"))
+		return
 	}
 
-	c.JSON(http.StatusOK, resp)
+	// prepare response
+	basicResponse.Status = resp["status"].(bool)
+	basicResponse.Message = resp["message"].(string)
+	basicResponse.Result = resp["nfts"]
+	c.JSON(http.StatusOK, basicResponse)
 	// Add a newline to the response body if required
 	c.Writer.Write([]byte("\n"))
 }
@@ -3396,16 +3796,21 @@ func getAllNFTRequest(did string, rubixNodePort string) (map[string]interface{},
 // @Produce json
 // @Param rubixNodePort query string true "Rubix node port"
 // @Param request body DeploySmartContractRequest true "Smart contract deployment details"
-// @Success 200 {object} map[string]string
-// @Failure 400 {object} ErrorResponse
-// @Failure 401 {object} ErrorResponse
+// @Success 200 {object} BasicResponse
+// @Failure 400 {object} BasicResponse
+// @Failure 401 {object} BasicResponse
 // @Security BearerAuth
 // @Param Authorization header string true "Authorization token (Bearer <your_token>)"
 // @Router /deploy-smart-contract [post]
 func deploySmartContractHandler(c *gin.Context) {
+	basicResponse := BasicResponse{
+		Status: false,
+	}
 	tokenString := c.GetHeader("Authorization")
 	if tokenString == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Token is required"})
+		basicResponse.Message = "Token is required"
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		c.Abort()
 		return
 	}
@@ -3420,43 +3825,69 @@ func deploySmartContractHandler(c *gin.Context) {
 	})
 
 	if err != nil || !token.Valid {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
+		basicResponse.Message = "Invalid token, " + err.Error()
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		c.Abort()
 		return
 	}
 
-	rubixNodePort := c.Query("rubixNodePort")
-	if rubixNodePort == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Rubix node port is required"})
-		return
-	}
+	// rubixNodePort := c.Query("rubixNodePort")
+	// if rubixNodePort == "" {
+	// 	basicResponse.Message = "Rubix node port is required"
+	// 	c.JSON(http.StatusBadRequest, basicResponse)
+	// 	c.Writer.Write([]byte("\n"))
+	// 	return
+	// }
 
 	var req DeploySmartContractRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input"})
-		return
-	}
-
-	resp, err := deploySmartContractReq(req, rubixNodePort)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		basicResponse.Message = "Invalid input, " + err.Error()
+		c.JSON(http.StatusBadRequest, basicResponse)
 		c.Writer.Write([]byte("\n"))
 		return
 	}
 
-	// sign response
-	respMsg, err := callSignHandler(resp, req.DeployerAddr)
+	user, err := storage.GetUserByDID(req.DeployerAddr)
 	if err != nil {
-		log.Println("failed to call sign handler, err:", err.Error())
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": err.Error(),
-		})
+		basicResponse.Message = "User not found, " + err.Error()
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
+		return
+	}
+
+	response, err := deploySmartContractReq(req, strconv.Itoa(user.Port))
+	if err != nil {
+		basicResponse.Message = err.Error()
+		c.JSON(http.StatusBadRequest, basicResponse)
+		c.Writer.Write([]byte("\n"))
+		return
+	}
+
+	respMsg := response["message"].(string)
+	// sign, if the message says 'signature needed'
+	if strings.Contains(respMsg, "Signature needed") {
+		respMsg, err = callSignHandler(response, req.DeployerAddr)
+		if err != nil {
+			basicResponse.Message = err.Error()
+			c.JSON(http.StatusInternalServerError, basicResponse)
+			// Add a newline to the response body if required
+			c.Writer.Write([]byte("\n"))
+			return
+		}
+	} else {
+		basicResponse.Status = response["status"].(bool)
+		basicResponse.Message = respMsg
+		c.JSON(http.StatusInternalServerError, basicResponse)
 		// Add a newline to the response body if required
 		c.Writer.Write([]byte("\n"))
 		return
 	}
 
-	c.JSON(http.StatusOK, respMsg)
+	//prepare response
+	basicResponse.Status = true
+	basicResponse.Message = respMsg
+	c.JSON(http.StatusOK, basicResponse)
 	c.Writer.Write([]byte("\n"))
 }
 
@@ -3518,16 +3949,21 @@ func deploySmartContractReq(data DeploySmartContractRequest, rubixNodePort strin
 // @Param binaryCodePath formData file true "Binary code file"
 // @Param rawCodePath formData file true "Raw code file"
 // @Param schemaFilePath formData file true "Schema file"
-// @Success 200 {object} map[string]string
-// @Failure 400 {object} ErrorResponse
-// @Failure 401 {object} ErrorResponse
+// @Success 200 {object} BasicResponse
+// @Failure 400 {object} BasicResponse
+// @Failure 401 {object} BasicResponse
 // @Security BearerAuth
 // @Param Authorization header string true "Authorization token (Bearer <your_token>)"
 // @Router /generate-smart-contract [post]
 func generateSmartContractHandler(c *gin.Context) {
+	basicResponse := BasicResponse{
+		Status: false,
+	}
 	tokenString := c.GetHeader("Authorization")
 	if tokenString == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Token is required"})
+		basicResponse.Message = "Token is required"
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		c.Abort()
 		return
 	}
@@ -3542,41 +3978,45 @@ func generateSmartContractHandler(c *gin.Context) {
 	})
 
 	if err != nil || !token.Valid {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
+		basicResponse.Message = "Invalid token, " + err.Error()
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		c.Abort()
-		return
-	}
-
-	rubixNodePort := c.Query("rubixNodePort")
-	if rubixNodePort == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Rubix node port is required"})
 		return
 	}
 
 	err = c.Request.ParseMultipartForm(10 << 20) // Limit to 10 MB
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Unable to parse form data"})
+		basicResponse.Message = "Unable to parse form data, " + err.Error()
+		c.JSON(http.StatusBadRequest, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	// Save the files to the server's file system
 	binaryFile, _, err := c.Request.FormFile("binaryCodePath")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Error reading binary file"})
+		basicResponse.Message = "Error reading binary file, " + err.Error()
+		c.JSON(http.StatusBadRequest, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 	defer binaryFile.Close()
 
 	rawFile, _, err := c.Request.FormFile("rawCodePath")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Error reading raw file"})
+		basicResponse.Message = "Error reading raw file"
+		c.JSON(http.StatusBadRequest, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 	defer rawFile.Close()
 
 	schemaFile, _, err := c.Request.FormFile("schemaFilePath")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Error reading schema file"})
+		basicResponse.Message = "Error reading schema file"
+		c.JSON(http.StatusBadRequest, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 	defer schemaFile.Close()
@@ -3593,37 +4033,49 @@ func generateSmartContractHandler(c *gin.Context) {
 
 	binaryOut, err := os.Create(binaryFilePath)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error saving binary file"})
+		basicResponse.Message = "Error saving baniry file"
+		c.JSON(http.StatusInternalServerError, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 	defer binaryOut.Close()
 	_, err = io.Copy(binaryOut, binaryFile)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error saving binary file"})
+		basicResponse.Message = "Error saving binary file"
+		c.JSON(http.StatusInternalServerError, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	rawOut, err := os.Create(rawFilePath)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error saving raw file"})
+		basicResponse.Message = "Error saving raw file"
+		c.JSON(http.StatusInternalServerError, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 	defer rawOut.Close()
 	_, err = io.Copy(rawOut, rawFile)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error saving raw file"})
+		basicResponse.Message = "Error saving raw file"
+		c.JSON(http.StatusInternalServerError, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	schemaOut, err := os.Create(schemaFilePath)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error saving schema file"})
+		basicResponse.Message = "Error saving schema file"
+		c.JSON(http.StatusInternalServerError, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 	defer schemaOut.Close()
 	_, err = io.Copy(schemaOut, schemaFile)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error saving schema file"})
+		basicResponse.Message = "Error saving schema file"
+		c.JSON(http.StatusInternalServerError, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 
@@ -3635,20 +4087,34 @@ func generateSmartContractHandler(c *gin.Context) {
 		SchemaFilePath: schemaFilePath,
 	}
 
-	// Trigger Rubix Node call
-	respMsg, err := generateSmartContractReq(data, rubixNodePort)
+	// get user details by did
+	user, err := storage.GetUserByDID(data.DID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error generating smart contract"})
+		basicResponse.Message = "User not found, " + err.Error()
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
+		return
+	}
+
+	// Trigger Rubix Node call
+	respMsg, err := generateSmartContractReq(data, strconv.Itoa(user.Port))
+	if err != nil {
+		basicResponse.Message = "Error generating smart contract"
+		c.JSON(http.StatusInternalServerError, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	// Respond with the paths or stream the files back to the client
-	c.JSON(http.StatusOK, gin.H{
-		"message":        respMsg, // This will be the response from Rubix node
+	basicResponse.Status = true
+	basicResponse.Message = respMsg // This will be the response from Rubix node
+	basicResponse.Result = map[string]interface{}{
 		"binaryFilePath": binaryFilePath,
 		"rawFilePath":    rawFilePath,
 		"schemaFilePath": schemaFilePath,
-	})
+	}
+	c.JSON(http.StatusOK, basicResponse)
+	c.Writer.Write([]byte("\n"))
 
 	// Stream the files back to the client (if required)
 	// c.File(binaryFilePath) // Example of sending the binary file back
@@ -3782,16 +4248,21 @@ func generateSmartContractReq(data GenerateSmartContractRequest, rubixNodePort s
 // @Produce json
 // @Param rubixNodePort query string true "Rubix node port"
 // @Param request body ExecuteSmartContractRequest true "Smart contract execution details"
-// @Success 200 {object} map[string]string
-// @Failure 400 {object} ErrorResponse
-// @Failure 401 {object} ErrorResponse
+// @Success 200 {object} BasicResponse
+// @Failure 400 {object} BasicResponse
+// @Failure 401 {object} BasicResponse
 // @Security BearerAuth
 // @Param Authorization header string true "Authorization token (Bearer <your_token>)"
 // @Router /execute-smart-contract [post]
 func executeSmartContractHandler(c *gin.Context) {
+	basicResponse := BasicResponse{
+		Status: false,
+	}
 	tokenString := c.GetHeader("Authorization")
 	if tokenString == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Token is required"})
+		basicResponse.Message = "Token is required"
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		c.Abort()
 		return
 	}
@@ -3806,43 +4277,62 @@ func executeSmartContractHandler(c *gin.Context) {
 	})
 
 	if err != nil || !token.Valid {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
+		basicResponse.Message = "Invalid token, " + err.Error()
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		c.Abort()
-		return
-	}
-
-	rubixNodePort := c.Query("rubixNodePort")
-	if rubixNodePort == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Rubix node port is required"})
 		return
 	}
 
 	var req ExecuteSmartContractRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input"})
-		return
-	}
-
-	resp, err := executeSmartContractReq(req, rubixNodePort)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		basicResponse.Message = "Invalid input, " + err.Error()
+		c.JSON(http.StatusBadRequest, basicResponse)
 		c.Writer.Write([]byte("\n"))
 		return
 	}
 
-	// sign response
-	respMsg, err := callSignHandler(resp, req.ExecutorAddr)
+	// get user info by did
+	user, err := storage.GetUserByDID(req.ExecutorAddr)
 	if err != nil {
-		log.Println("failed to call sign handler, err:", err.Error())
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": err.Error(),
-		})
+		basicResponse.Message = "User not found, " + err.Error()
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
+		return
+	}
+
+	response, err := executeSmartContractReq(req, strconv.Itoa(user.Port))
+	if err != nil {
+		basicResponse.Message = err.Error()
+		c.JSON(http.StatusBadRequest, basicResponse)
+		c.Writer.Write([]byte("\n"))
+		return
+	}
+
+	respMsg := response["message"].(string)
+	// sign, if the message says 'signature needed'
+	if strings.Contains(respMsg, "Signature needed") {
+		respMsg, err = callSignHandler(response, req.ExecutorAddr)
+		if err != nil {
+			basicResponse.Message = err.Error()
+			c.JSON(http.StatusInternalServerError, basicResponse)
+			// Add a newline to the response body if required
+			c.Writer.Write([]byte("\n"))
+			return
+		}
+	} else {
+		basicResponse.Status = response["status"].(bool)
+		basicResponse.Message = respMsg
+		c.JSON(http.StatusInternalServerError, basicResponse)
 		// Add a newline to the response body if required
 		c.Writer.Write([]byte("\n"))
 		return
 	}
 
-	c.JSON(http.StatusOK, respMsg)
+	// prepare response
+	basicResponse.Status = true
+	basicResponse.Message = respMsg
+	c.JSON(http.StatusOK, basicResponse)
 	c.Writer.Write([]byte("\n"))
 }
 
@@ -3892,4 +4382,148 @@ func executeSmartContractReq(data ExecuteSmartContractRequest, rubixNodePort str
 	}
 
 	return response, nil
+}
+
+// @Summary Subscribe to an SmartContract
+// @Description Subscribes a user to an SmartContract
+// @Tags SmartContract
+// @Accept json
+// @Produce json
+// @Param request body SubscribeSmartContractRequest true "SmartContract subscription details"
+// @Success 200 {object} BasicResponse
+// @Failure 400 {object} BasicResponse
+// @Failure 401 {object} BasicResponse
+// @Security BearerAuth
+// @Param Authorization header string true "Authorization token (Bearer <your_token>)"
+// @Router /subscribe-smart-contract [post]
+func subscribeSmartContractHandler(c *gin.Context) {
+	basicResponse := BasicResponse{
+		Status: false,
+	}
+	tokenString := c.GetHeader("Authorization")
+	if tokenString == "" {
+		basicResponse.Message = "Token is required"
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
+		c.Abort()
+		return
+	}
+
+	tokenString = tokenString[len("Bearer "):]
+
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("Unexpected signing method")
+		}
+		return jwtSecret, nil
+	})
+
+	if err != nil || !token.Valid {
+		basicResponse.Message = "Invalid token, " + err.Error()
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
+		c.Abort()
+		return
+	}
+
+	// Extract the DID claim from the token
+	claims := token.Claims.(jwt.MapClaims)
+	did, ok := claims["sub"].(string)
+	if !ok {
+		basicResponse.Message = "Invalid token: missing or invalid DID"
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
+		return
+	}
+
+	// Optionally, verify the DID exists in the database
+	user, err := storage.GetUserByDID(did)
+	if err != nil {
+		basicResponse.Message = "User not found, " + err.Error()
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
+		return
+	}
+
+	var req SubscribeSmartContractRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		basicResponse.Message = "Invalid input, " + err.Error()
+		c.JSON(http.StatusBadRequest, basicResponse)
+		c.Writer.Write([]byte("\n"))
+		return
+	}
+
+	// Ensure the DID from the token matches the one in the request body
+	if req.DID != did {
+		basicResponse.Message = "DID mismatch"
+		c.JSON(http.StatusForbidden, basicResponse)
+		c.Writer.Write([]byte("\n"))
+		return
+	}
+
+	resp, err := subscribeSmartContractRequest(req.SmartContractToken, strconv.Itoa(user.Port))
+	if err != nil {
+		basicResponse.Message = err.Error()
+		c.JSON(http.StatusBadRequest, basicResponse)
+		// Add a newline to the response body if required
+		c.Writer.Write([]byte("\n"))
+		return
+	}
+
+	// preapre response
+	basicResponse.Status = true
+	basicResponse.Message = resp
+	c.JSON(http.StatusOK, basicResponse)
+	// Add a newline to the response body if required
+	c.Writer.Write([]byte("\n"))
+}
+
+// subscribeSmartContractRequest sends request to subscribe SmartContract
+func subscribeSmartContractRequest(SmartContract string, rubixNodePort string) (string, error) {
+	data := map[string]interface{}{
+		"smartContractToken": SmartContract,
+	}
+	bodyJSON, err := json.Marshal(data)
+	if err != nil {
+		fmt.Println("Error marshaling JSON:", err)
+		return "", err
+	}
+
+	url := fmt.Sprintf("http://localhost:%s/api/subscribe-smart-contract", rubixNodePort)
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(bodyJSON))
+	if err != nil {
+		fmt.Println("Error creating HTTP request:", err)
+		return "", err
+	}
+
+	req.Header.Set("Content-Type", "application/json; charset=UTF-8")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		fmt.Println("Error sending HTTP request:", err)
+		return "", err
+	}
+	defer resp.Body.Close()
+	data2, err := io.ReadAll(resp.Body)
+	if err != nil {
+		fmt.Printf("Error reading response body: %s\n", err)
+		return "", err
+	}
+
+	// Process the data as needed
+	var response map[string]interface{}
+	err = json.Unmarshal(data2, &response)
+	if err != nil {
+		fmt.Println("Error unmarshaling response:", err)
+	}
+
+	respMsg := response["message"].(string)
+	respStatus := response["status"].(bool)
+
+	if !respStatus {
+		return "", fmt.Errorf("failed to subscribe SmartContract, %s", respMsg)
+	}
+
+	return respMsg, nil
 }

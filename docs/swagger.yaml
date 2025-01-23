@@ -1,5 +1,13 @@
 basePath: /
 definitions:
+  main.BasicResponse:
+    properties:
+      message:
+        type: string
+      result: {}
+      status:
+        type: boolean
+    type: object
   main.CreateFTRequest:
     properties:
       did:
@@ -62,7 +70,7 @@ definitions:
         type: string
       quorumType:
         type: integer
-      rbtamount:
+      rbtAmount:
         type: integer
       smartContractToken:
         type: string
@@ -233,17 +241,15 @@ paths:
         "200":
           description: OK
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/main.BasicResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/main.ErrorResponse'
+            $ref: '#/definitions/main.BasicResponse'
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/main.ErrorResponse'
+            $ref: '#/definitions/main.BasicResponse'
       security:
       - BearerAuth: []
       summary: Add peer to a DID quorum
@@ -302,17 +308,15 @@ paths:
         "200":
           description: OK
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/main.BasicResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/main.ErrorResponse'
+            $ref: '#/definitions/main.BasicResponse'
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/main.ErrorResponse'
+            $ref: '#/definitions/main.BasicResponse'
       security:
       - BearerAuth: []
       summary: Create fungible tokens
@@ -341,17 +345,15 @@ paths:
         "200":
           description: OK
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/main.BasicResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/main.ErrorResponse'
+            $ref: '#/definitions/main.BasicResponse'
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/main.ErrorResponse'
+            $ref: '#/definitions/main.BasicResponse'
       security:
       - BearerAuth: []
       summary: Create a non-fungible token
@@ -417,17 +419,15 @@ paths:
         "200":
           description: OK
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/main.BasicResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/main.ErrorResponse'
+            $ref: '#/definitions/main.BasicResponse'
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/main.ErrorResponse'
+            $ref: '#/definitions/main.BasicResponse'
       security:
       - BearerAuth: []
       summary: Deploy a smart contract
@@ -456,17 +456,15 @@ paths:
         "200":
           description: OK
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/main.BasicResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/main.ErrorResponse'
+            $ref: '#/definitions/main.BasicResponse'
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/main.ErrorResponse'
+            $ref: '#/definitions/main.BasicResponse'
       security:
       - BearerAuth: []
       summary: Deploy an NFT
@@ -500,17 +498,15 @@ paths:
         "200":
           description: OK
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/main.BasicResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/main.ErrorResponse'
+            $ref: '#/definitions/main.BasicResponse'
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/main.ErrorResponse'
+            $ref: '#/definitions/main.BasicResponse'
       security:
       - BearerAuth: []
       summary: Execute a smart contract
@@ -539,17 +535,15 @@ paths:
         "200":
           description: OK
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/main.BasicResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/main.ErrorResponse'
+            $ref: '#/definitions/main.BasicResponse'
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/main.ErrorResponse'
+            $ref: '#/definitions/main.BasicResponse'
       security:
       - BearerAuth: []
       summary: Execute an NFT
@@ -598,17 +592,15 @@ paths:
         "200":
           description: OK
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/main.BasicResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/main.ErrorResponse'
+            $ref: '#/definitions/main.BasicResponse'
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/main.ErrorResponse'
+            $ref: '#/definitions/main.BasicResponse'
       security:
       - BearerAuth: []
       summary: Generate a smart contract
@@ -636,16 +628,15 @@ paths:
         "200":
           description: OK
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/main.BasicResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/main.ErrorResponse'
+            $ref: '#/definitions/main.BasicResponse'
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/main.ErrorResponse'
+            $ref: '#/definitions/main.BasicResponse'
       security:
       - BearerAuth: []
       summary: Get all fungible tokens
@@ -673,16 +664,15 @@ paths:
         "200":
           description: OK
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/main.BasicResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/main.ErrorResponse'
+            $ref: '#/definitions/main.BasicResponse'
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/main.ErrorResponse'
+            $ref: '#/definitions/main.BasicResponse'
       security:
       - BearerAuth: []
       summary: Get all NFTs
@@ -710,16 +700,15 @@ paths:
         "200":
           description: OK
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/main.BasicResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/main.ErrorResponse'
+            $ref: '#/definitions/main.BasicResponse'
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/main.ErrorResponse'
+            $ref: '#/definitions/main.BasicResponse'
       security:
       - BearerAuth: []
       summary: Get fungible token chain
@@ -747,16 +736,15 @@ paths:
         "200":
           description: OK
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/main.BasicResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/main.ErrorResponse'
+            $ref: '#/definitions/main.BasicResponse'
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/main.ErrorResponse'
+            $ref: '#/definitions/main.BasicResponse'
       security:
       - BearerAuth: []
       summary: Get NFT details
@@ -784,16 +772,15 @@ paths:
         "200":
           description: OK
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/main.BasicResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/main.ErrorResponse'
+            $ref: '#/definitions/main.BasicResponse'
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/main.ErrorResponse'
+            $ref: '#/definitions/main.BasicResponse'
       security:
       - BearerAuth: []
       summary: Get NFT chain
@@ -879,17 +866,15 @@ paths:
         "200":
           description: OK
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/main.BasicResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/main.ErrorResponse'
+            $ref: '#/definitions/main.BasicResponse'
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/main.ErrorResponse'
+            $ref: '#/definitions/main.BasicResponse'
       security:
       - BearerAuth: []
       summary: Unpledge RBT tokens
@@ -918,17 +903,15 @@ paths:
         "200":
           description: OK
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/main.BasicResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/main.ErrorResponse'
+            $ref: '#/definitions/main.BasicResponse'
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/main.ErrorResponse'
+            $ref: '#/definitions/main.BasicResponse'
       security:
       - BearerAuth: []
       summary: Register DID
@@ -956,16 +939,15 @@ paths:
         "200":
           description: OK
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/main.BasicResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/main.ErrorResponse'
+            $ref: '#/definitions/main.BasicResponse'
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/main.ErrorResponse'
+            $ref: '#/definitions/main.BasicResponse'
       security:
       - BearerAuth: []
       summary: Get RBT balance
@@ -994,16 +976,15 @@ paths:
         "200":
           description: OK
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/main.BasicResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/main.ErrorResponse'
+            $ref: '#/definitions/main.BasicResponse'
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/main.ErrorResponse'
+            $ref: '#/definitions/main.BasicResponse'
       security:
       - BearerAuth: []
       summary: Request a transaction
@@ -1032,17 +1013,15 @@ paths:
         "200":
           description: OK
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/main.BasicResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/main.ErrorResponse'
+            $ref: '#/definitions/main.BasicResponse'
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/main.ErrorResponse'
+            $ref: '#/definitions/main.BasicResponse'
       security:
       - BearerAuth: []
       summary: Setup Quorum
@@ -1066,15 +1045,15 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/main.SignRequest'
+            $ref: '#/definitions/main.BasicResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/main.ErrorResponse'
+            $ref: '#/definitions/main.BasicResponse'
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/main.ErrorResponse'
+            $ref: '#/definitions/main.BasicResponse'
       security:
       - BearerAuth: []
       summary: Sign a transaction
@@ -1103,17 +1082,15 @@ paths:
         "200":
           description: OK
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/main.BasicResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/main.ErrorResponse'
+            $ref: '#/definitions/main.BasicResponse'
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/main.ErrorResponse'
+            $ref: '#/definitions/main.BasicResponse'
       security:
       - BearerAuth: []
       summary: Subscribe to an NFT
@@ -1142,17 +1119,15 @@ paths:
         "200":
           description: OK
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/main.BasicResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/main.ErrorResponse'
+            $ref: '#/definitions/main.BasicResponse'
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/main.ErrorResponse'
+            $ref: '#/definitions/main.BasicResponse'
       security:
       - BearerAuth: []
       summary: Create test RBT tokens
@@ -1181,17 +1156,15 @@ paths:
         "200":
           description: OK
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/main.BasicResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/main.ErrorResponse'
+            $ref: '#/definitions/main.BasicResponse'
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/main.ErrorResponse'
+            $ref: '#/definitions/main.BasicResponse'
       security:
       - BearerAuth: []
       summary: Transfer fungible tokens
@@ -1231,16 +1204,15 @@ paths:
         "200":
           description: OK
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/main.BasicResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/main.ErrorResponse'
+            $ref: '#/definitions/main.BasicResponse'
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/main.ErrorResponse'
+            $ref: '#/definitions/main.BasicResponse'
       security:
       - BearerAuth: []
       summary: Get transactions by DID
