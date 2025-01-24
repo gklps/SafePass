@@ -635,6 +635,7 @@ func createWalletHandler(c *gin.Context) {
 	did, err := didRequest(pubKeyStr, strconv.Itoa(req.Port))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid request, " + err.Error()})
+		fmt.Println(err)
 		// Add a newline to the response body
 		c.Writer.Write([]byte("\n"))
 		return
