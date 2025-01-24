@@ -1078,7 +1078,7 @@ func signTransactionHandler(c *gin.Context) {
 	}
 	resp, err := signResponse(signResp, user.Port)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error(), "port": user.Port, "did": user.DID})
 		return
 	}
 
