@@ -1325,6 +1325,64 @@ const docTemplate = `{
                 }
             }
         },
+        "/subscribe-smart-contract": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Subscribes a user to an SmartContract",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SmartContract"
+                ],
+                "summary": "Subscribe to an SmartContract",
+                "parameters": [
+                    {
+                        "description": "SmartContract subscription details",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/main.SubscribeSmartContractRequest"
+                        }
+                    },
+                    {
+                        "type": "string",
+                        "description": "Authorization token (Bearer \u003cyour_token\u003e)",
+                        "name": "Authorization",
+                        "in": "header",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/main.BasicResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/main.BasicResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/main.BasicResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/subscribe_nft": {
             "post": {
                 "security": [
@@ -1821,6 +1879,17 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "nft": {
+                    "type": "string"
+                }
+            }
+        },
+        "main.SubscribeSmartContractRequest": {
+            "type": "object",
+            "properties": {
+                "did": {
+                    "type": "string"
+                },
+                "smartContractToken": {
                     "type": "string"
                 }
             }

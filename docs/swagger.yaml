@@ -163,6 +163,13 @@ definitions:
       nft:
         type: string
     type: object
+  main.SubscribeSmartContractRequest:
+    properties:
+      did:
+        type: string
+      smartContractToken:
+        type: string
+    type: object
   main.TokenResponse:
     properties:
       token:
@@ -1059,6 +1066,43 @@ paths:
       summary: Sign a transaction
       tags:
       - Txn
+  /subscribe-smart-contract:
+    post:
+      consumes:
+      - application/json
+      description: Subscribes a user to an SmartContract
+      parameters:
+      - description: SmartContract subscription details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/main.SubscribeSmartContractRequest'
+      - description: Authorization token (Bearer <your_token>)
+        in: header
+        name: Authorization
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/main.BasicResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/main.BasicResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/main.BasicResponse'
+      security:
+      - BearerAuth: []
+      summary: Subscribe to an SmartContract
+      tags:
+      - SmartContract
   /subscribe_nft:
     post:
       consumes:
