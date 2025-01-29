@@ -10,11 +10,13 @@ go run wallet.go
 
 ### Curl request to create a new user
 ```
-curl -X POST http://localhost:8080/create -d '{"email":"<email id>","password":"<password>","name":"<user name>"}'
+curl -X POST http://localhost:8080/create -d '{"email":"<email id>","password":"<password>","name":"<user name>","secret_key":"<secret key to encrypt private key>"}'
 ```
+_**Note** : If `secret_key` is not provided explicitly, password will be used as `secret_key`_
+
 #### sample with valid request 
 ```
-curl -X POST http://localhost:8080/create -d '{"email":"mani@p.com","password":"123","name":"mani"}'
+curl -X POST http://localhost:8080/create -d '{"email":"mani@p.com","password":"123","name":"mani","secret_key":"abc123"}'
 ```
 **Response:**
 ```
@@ -22,7 +24,7 @@ curl -X POST http://localhost:8080/create -d '{"email":"mani@p.com","password":"
 ```
 #### sample with invalid request (invalid input format to name)
 ```
-curl -X POST http://localhost:8080/create -d '{"email":"jiya@p.com","password":"123","name":jiya}'
+curl -X POST http://localhost:8080/create -d '{"email":"jiya@p.com","password":"123","name":jiya,"secret_key":"abc123"}'
 ```
 **Response:**
 ```

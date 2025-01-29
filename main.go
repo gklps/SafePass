@@ -24,6 +24,7 @@ import (
 	secp256k1 "github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"github.com/gklps/wallet-frontend/aesutils"
 	_ "github.com/gklps/wallet-frontend/docs" // Local Swagger docs import
 	"github.com/gklps/wallet-frontend/storage"
 	"github.com/golang-jwt/jwt"
@@ -64,20 +65,23 @@ type ErrorResponse struct {
 
 // CreateUserRequest represents the structure for creating a new user
 type CreateUserRequest struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
-	Name     string `json:"name"`
+	Email     string `json:"email"`
+	Password  string `json:"password"`
+	Name      string `json:"name"`
+	SecretKey string `json:"secret_key"`
 }
 
 // did request
 type DIDRequest struct {
-	Port int `json:"port"`
+	Port      int    `json:"port"`
+	SecretKey string `json:"secret_key"`
 }
 
 // sign request
 type SignRequest struct {
-	Data SignReqData `json:"sign_data"`
-	DID  string      `json:"did"`
+	Data      SignReqData `json:"sign_data"`
+	DID       string      `json:"did"`
+	SecretKey string      `json:"secret_key"`
 }
 
 type SignReqData struct {
@@ -321,10 +325,10 @@ func loginHandler(c *gin.Context) {
 	}
 
 	// Retrieve the hashed password and DID from the database for the user
-	var storedHashedPassword, did string
+	var storedHashedPassword, storedHashedSecretKey, did string
 	var user User
-	row := db.QueryRow("SELECT id, email, name, password, did FROM walletUsers WHERE email = ?", creds.Email)
-	err := row.Scan(&user.ID, &user.Email, &user.Name, &storedHashedPassword, &did)
+	row := db.QueryRow("SELECT id, email, name, password, secret_key, did FROM walletUsers WHERE email = ?", creds.Email)
+	err := row.Scan(&user.ID, &user.Email, &user.Name, &storedHashedPassword, &storedHashedSecretKey, &did)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
 		return
@@ -351,6 +355,7 @@ func loginHandler(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"token": tokenString})
+	c.Writer.Write([]byte("\n"))
 }
 
 // CreateUser handler to create a new user and return the user profile
@@ -378,6 +383,16 @@ func createUserHandler(c *gin.Context) {
 		return
 	}
 
+	// manage the secret key and hash it
+	if newUser.SecretKey == "" {
+		newUser.SecretKey = newUser.Password
+	}
+	hashedSecretKey, err := bcrypt.GenerateFromPassword([]byte(newUser.SecretKey), bcrypt.DefaultCost)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not hash secret key"})
+		return
+	}
+
 	// Increment the port counter for each new user, until a running port is found
 	var port int
 	for {
@@ -389,9 +404,17 @@ func createUserHandler(c *gin.Context) {
 	}
 
 	// Create the wallet and fetch the DID
-	walletRequest := `{"port":` + strconv.Itoa(port) + `}`
-	log.Printf("Sending request to /create_wallet: %s", walletRequest)
-	resp, err := http.Post("http://localhost:8080/create_wallet", "application/json", bytes.NewBuffer([]byte(walletRequest)))
+	data := DIDRequest{
+		Port:      port,
+		SecretKey: string(hashedSecretKey), // pass secret key to encrypt private key
+	}
+	walletRequest, err := json.Marshal(data)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error marshaling JSON, " + err.Error()})
+		return
+	}
+
+	resp, err := http.Post("http://localhost:8080/create_wallet", "application/json", bytes.NewBuffer(walletRequest))
 	if err != nil {
 		log.Printf("HTTP request error: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not connect to wallet service"})
@@ -412,7 +435,6 @@ func createUserHandler(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not read wallet response"})
 		return
 	}
-	log.Printf("Raw response from /create_wallet: %s", string(body))
 	if len(body) == 0 {
 		log.Printf("Empty response from /create_wallet")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Empty response from wallet service"})
@@ -435,7 +457,7 @@ func createUserHandler(c *gin.Context) {
 	}
 
 	// Insert new user into the database with DID
-	_, err = db.Exec("INSERT INTO walletUsers (email, password, name, did) VALUES (?, ?, ?, ?)", newUser.Email, string(hashedPassword), newUser.Name, didResponse.DID)
+	_, err = db.Exec("INSERT INTO walletUsers (email, password, secret_key, name, did) VALUES (?, ?, ?, ?, ?)", newUser.Email, string(hashedPassword), string(hashedSecretKey), newUser.Name, didResponse.DID)
 	if err != nil {
 		log.Printf("Database insert error: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not create user"})
@@ -448,6 +470,7 @@ func createUserHandler(c *gin.Context) {
 		"name":  newUser.Name,
 		"did":   didResponse.DID,
 	})
+	c.Writer.Write([]byte("\n"))
 }
 
 // Middleware to authenticate the user via JWT
@@ -610,7 +633,7 @@ func VerifyToken(tokenString string, publicKey *ecdsa.PublicKey) (bool, jwt.MapC
 // @Tags DID
 // @Accept json
 // @Produce json
-// @Param request body DIDRequest true "Port for DID request"
+// @Param request body DIDRequest true "Port for DID request and secret key"
 // @Success 200 {object} map[string]string
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
@@ -641,9 +664,17 @@ func createWalletHandler(c *gin.Context) {
 		return
 	}
 
-	// Save user to database
+	// encrypt private key to store
 	privKeyStr := hex.EncodeToString(privateKey.Serialize())
-	err = storage.InsertUser(did, pubKeyStr, privKeyStr, mnemonic, req.Port)
+	encryptedPrivateKey, err := aesutils.EncryptPrivateKey(privKeyStr, req.SecretKey)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encrypt private key, " + err.Error()})
+		c.Writer.Write([]byte("\n"))
+		return
+	}
+
+	// Save user to database
+	err = storage.InsertUser(did, pubKeyStr, encryptedPrivateKey, mnemonic, req.Port)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to store user data, " + err.Error()})
 		// Add a newline to the response body
@@ -1100,7 +1131,35 @@ func signTransactionHandler(c *gin.Context) {
 		return
 	}
 
-	signature, err := signData(user.PrivateKey.ToECDSA(), decodedBytes)
+	// Retrieve the hashed secret key from the database for the user
+	var storedHashedSecretKey string
+	var userInfo User
+	row := db.QueryRow("SELECT id, secret_key FROM walletUsers WHERE did = ?", user.DID)
+	err = row.Scan(&userInfo.ID, &storedHashedSecretKey)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "failed to get secret key of user"})
+		return
+	}
+
+	// decrypt the encrypted private key
+	decryptedPrivateKey, err := aesutils.DecryptPrivateKey(user.PrivateKey, storedHashedSecretKey)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to decrypt private key, " + err.Error()})
+		c.Writer.Write([]byte("\n"))
+		return
+	}
+
+	// Decode private key
+	privKeyBytes, err := hex.DecodeString(decryptedPrivateKey)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to decode private key, " + err.Error()})
+		c.Writer.Write([]byte("\n"))
+		return
+	}
+
+	privateKey := secp256k1.PrivKeyFromBytes(privKeyBytes)
+
+	signature, err := signData(privateKey.ToECDSA(), decodedBytes)
 	if err != nil {
 		basicResponse.Message = err.Error()
 		c.JSON(http.StatusInternalServerError, basicResponse)
@@ -1166,7 +1225,6 @@ func callSignHandler(response map[string]interface{}, did string) (string, error
 		return "", err
 	}
 
-	// log.Printf("Sending request to /create_wallet: %s", walletRequest)
 	resp, err := http.Post("http://localhost:8080/sign", "application/json", bytes.NewBuffer(bodyJSON))
 	if err != nil {
 		log.Printf("HTTP request error: %v", err)
@@ -1301,7 +1359,6 @@ func requestTransactionHandler(c *gin.Context) {
 		return
 	}
 
-	log.Println("Token claims:", claims)
 	response := SendAuthRequest(jwtToken, strconv.Itoa(user.Port))
 
 	respMsg := response["message"].(string)
@@ -1705,7 +1762,6 @@ func didRequest(pubKeyStr string, rubixNodePort string) (string, error) {
 
 // SendAuthRequest sends a JWT authentication request to the Rubix node
 func SendAuthRequest(jwtToken string, rubixNodePort string) map[string]interface{} {
-	log.Println("sending auth request to rubix node...")
 	authURL := fmt.Sprintf("http://localhost:%s/api/send-jwt-from-wallet", rubixNodePort)
 	req, err := http.NewRequest("POST", authURL, nil)
 	if err != nil {
@@ -1733,7 +1789,6 @@ func SendAuthRequest(jwtToken string, rubixNodePort string) map[string]interface
 		return nil
 	}
 
-	fmt.Printf("Response from Rubix Node: %s\n", body)
 	// Process the data as needed
 	var response map[string]interface{}
 	err = json.Unmarshal(body, &response)

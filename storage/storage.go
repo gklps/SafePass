@@ -13,7 +13,7 @@ import (
 type User struct {
 	DID        string // IPFS hash (simulated)
 	PublicKey  *secp256k1.PublicKey
-	PrivateKey *secp256k1.PrivateKey
+	PrivateKey string
 	// ChildPath int
 	Mnemonic string
 	Port     int
@@ -54,6 +54,7 @@ func InitDatabase() (*sql.DB, error) {
     id INTEGER PRIMARY KEY,
     email TEXT,
     password TEXT,
+	secret_key TEXT,
     name TEXT,
     did TEXT
 	)
@@ -71,8 +72,6 @@ func InitDatabase() (*sql.DB, error) {
 func InsertUser(did, publicKey, privateKey, mnemonic string, port int) error {
 	if db == nil {
 		log.Println("Database connection is nil")
-	} else {
-		log.Println("Database connection initialized successfully")
 	}
 
 	query := `INSERT INTO users (did, public_key, private_key, mnemonic, port) VALUES (?, ?, ?, ?, ?)`
@@ -84,8 +83,6 @@ func InsertUser(did, publicKey, privateKey, mnemonic string, port int) error {
 func GetUserByDID(did string) (*User, error) {
 	if db == nil {
 		log.Println("Database connection is nil")
-	} else {
-		log.Println("Database connection initialized successfully")
 	}
 
 	query := `SELECT public_key, private_key, mnemonic, port FROM users WHERE did = ?`
@@ -109,18 +106,10 @@ func GetUserByDID(did string) (*User, error) {
 		return nil, fmt.Errorf("failed to parse public key: %v", err)
 	}
 
-	// Decode private key
-	privKeyBytes, err := hex.DecodeString(privateKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode private key: %v", err)
-	}
-
-	privKey := secp256k1.PrivKeyFromBytes(privKeyBytes)
-
 	return &User{
 		DID:        did,
 		PublicKey:  pubKey,
-		PrivateKey: privKey,
+		PrivateKey: privateKey,
 		Mnemonic:   mnemonic,
 		Port:       port,
 	}, nil
