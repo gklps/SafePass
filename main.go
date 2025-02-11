@@ -24,9 +24,9 @@ import (
 	secp256k1 "github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
-	"github.com/gklps/wallet-frontend/aesutils"
-	_ "github.com/gklps/wallet-frontend/docs" // Local Swagger docs import
-	"github.com/gklps/wallet-frontend/storage"
+	"github.com/gklps/SafePass/aesutils"
+	_ "github.com/gklps/SafePass/docs" // Local Swagger docs import
+	"github.com/gklps/SafePass/storage"
 	"github.com/golang-jwt/jwt"
 	"github.com/google/uuid"
 	_ "github.com/mattn/go-sqlite3"            // SQLite driver

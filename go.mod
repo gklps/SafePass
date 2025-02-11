@@ -1,10 +1,10 @@
-module github.com/gklps/wallet-frontend
+module github.com/gklps/SafePass
 
 go 1.22.0
 
 toolchain go1.23.3
 
-replace github.com/gklps/wallet-frontend/docs => ./docs
+replace github.com/gklps/SafePass/docs => ./docs
 
 require (
 	github.com/gin-contrib/cors v1.7.2
