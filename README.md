@@ -10,18 +10,29 @@ go run wallet.go
 
 ### Curl request to create a new user
 ```
-curl -X POST http://localhost:8080/create -d '{"email":"<email id>","password":"<password>","name":"<user name>","secret_key":"<secret key to encrypt private key>"}'
+curl -X POST http://localhost:8080/create -d '{"email":"<email id>","password":"<password>","name":"<user name>","secret_key":"<secret key to encrypt private key>", "wallet_type":"<self-custody or server-custody>", "public_key": "<public key as hex string>"}'
 ```
-_**Note** : If `secret_key` is not provided explicitly, password will be used as `secret_key`_
+_**Note** : If `secret_key` is not provided explicitly, password will be used as `secret_key`, in case of server-custodial wallet_
 
 #### sample with valid request 
+**Self-Custodial**
 ```
-curl -X POST http://localhost:8080/create -d '{"email":"mani@p.com","password":"123","name":"mani","secret_key":"abc123"}'
+curl -X POST http://localhost:8080/create -d '{"email":"bob@c.com","password":"123","name":"bob", "wallet_type":"self-custody", "public_key":"041756d13ad46e7811c99c961762472aa64a67554ae09e78b9c096350bc6a8bed3798fe19e3e3203a69d0ac00a60dc32b3652a2e7e372a7c60a64a1f3e06ec4c18"}'
 ```
 **Response:**
 ```
-{"did":"bafybmiaysyb5hbdb6clsk7jncdejxwomxumv3zos5t57f6bwz7numvaina","email":"mani@p.com","name":"mani"}
+{"did":"bafybmiatw5srgqlw3t5sm4buktu5gcgbfhkgujohem3o3a4cusvt424sei","email":"bob@c.com","name":"bob"}
 ```
+
+**Server-Custodial**
+```
+curl -X POST http://localhost:8080/create -d '{"email":"alice@c.com","password":"123","name":"alice","secret_key":"abc123", "wallet_type":"server-custody"}'
+```
+**Response:**
+```
+{"did":"bafybmiaf2y3kkmd77e4hxp2yee2mhiquoc5hyr4mjya2sa5hccnnmk4bci","email":"alice@c.com","name":"alice"}
+```
+
 #### sample with invalid request (invalid input format to name)
 ```
 curl -X POST http://localhost:8080/create -d '{"email":"jiya@p.com","password":"123","name":jiya,"secret_key":"abc123"}'

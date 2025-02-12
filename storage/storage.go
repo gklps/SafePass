@@ -14,11 +14,11 @@ import (
 // User data structure for wallet management
 type User struct {
 	DID        string // IPFS hash (simulated)
+	WalletType string
 	PublicKey  *secp256k1.PublicKey
 	PrivateKey string
-	// ChildPath int
-	Mnemonic string
-	Port     int
+	Mnemonic   string
+	Port       int
 }
 
 // sqlite database: manages tables for user data and jwt tokens
@@ -127,6 +127,7 @@ func InitDatabase() (*sql.DB, error) {
 	CREATE TABLE IF NOT EXISTS users (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		did TEXT UNIQUE NOT NULL,
+		wallet_type TEXT,
 		public_key BLOB NOT NULL,
 		private_key BLOB NOT NULL,
 		mnemonic TEXT NOT NULL,
@@ -169,6 +170,15 @@ func InitDatabase() (*sql.DB, error) {
 	if err != nil {
 		log.Fatal("Failed to update walletUsers secret keys:", err)
 	}
+
+	// ensure wallet_type for each user did
+	err = EnsureTableColumns("users", map[string]string{
+		"wallet_type": "TEXT",
+	})
+	if err != nil {
+		log.Fatal("Failed to ensure walletUsers columns:", err)
+	}
+
 	// Optimize database performance
 	db.Exec("PRAGMA analyze;")
 	db.Exec("PRAGMA vacuum;")
@@ -176,13 +186,13 @@ func InitDatabase() (*sql.DB, error) {
 }
 
 // insert user data
-func InsertUser(did, publicKey, privateKey, mnemonic string, port int) error {
+func InsertUser(did, walletType, publicKey, privateKey, mnemonic string, port int) error {
 	if db == nil {
 		log.Println("Database connection is nil")
 	}
 
-	query := `INSERT INTO users (did, public_key, private_key, mnemonic, port) VALUES (?, ?, ?, ?, ?)`
-	_, err := db.Exec(query, did, publicKey, privateKey, mnemonic, port)
+	query := `INSERT INTO users (did, wallet_type, public_key, private_key, mnemonic, port) VALUES (?, ?, ?, ?, ?, ?)`
+	_, err := db.Exec(query, did, walletType, publicKey, privateKey, mnemonic, port)
 	return err
 }
 
@@ -192,12 +202,12 @@ func GetUserByDID(did string) (*User, error) {
 		log.Println("Database connection is nil")
 	}
 
-	query := `SELECT public_key, private_key, mnemonic, port FROM users WHERE did = ?`
+	query := `SELECT wallet_type, public_key, private_key, mnemonic, port FROM users WHERE did = ?`
 	row := db.QueryRow(query, did)
 
-	var publicKey, privateKey, mnemonic string
+	var walletType, publicKey, privateKey, mnemonic string
 	var port int
-	err := row.Scan(&publicKey, &privateKey, &mnemonic, &port)
+	err := row.Scan(&walletType, &publicKey, &privateKey, &mnemonic, &port)
 	if err != nil {
 		return nil, err
 	}
@@ -215,6 +225,7 @@ func GetUserByDID(did string) (*User, error) {
 
 	return &User{
 		DID:        did,
+		WalletType: walletType,
 		PublicKey:  pubKey,
 		PrivateKey: privateKey,
 		Mnemonic:   mnemonic,

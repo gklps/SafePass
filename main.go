@@ -15,6 +15,7 @@ import (
 	"mime/multipart"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -65,17 +66,26 @@ type ErrorResponse struct {
 
 // CreateUserRequest represents the structure for creating a new user
 type CreateUserRequest struct {
-	Email     string `json:"email"`
-	Password  string `json:"password"`
-	Name      string `json:"name"`
-	SecretKey string `json:"secret_key"`
+	Email      string `json:"email"`
+	Password   string `json:"password"`
+	Name       string `json:"name"`
+	SecretKey  string `json:"secret_key"`
+	WalletType string `json:"wallet_type"`
+	PublicKey  string `json:"public_key"`
 }
 
 // did request
 type DIDRequest struct {
-	Port      int    `json:"port"`
-	SecretKey string `json:"secret_key"`
+	Port       int    `json:"port"`
+	SecretKey  string `json:"secret_key"`
+	WalletType string `json:"wallet_type"`
+	PublicKey  string `json:"public_key"`
 }
+
+const (
+	Custodial    = "self-custody"
+	NonCustodial = "server-custody"
+)
 
 // sign request
 type SignRequest struct {
@@ -376,6 +386,10 @@ func createUserHandler(c *gin.Context) {
 		return
 	}
 
+	if newUser.WalletType != Custodial && newUser.WalletType != NonCustodial {
+		newUser.WalletType = NonCustodial
+	}
+
 	// Hash the user's password
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(newUser.Password), bcrypt.DefaultCost)
 	if err != nil {
@@ -383,15 +397,20 @@ func createUserHandler(c *gin.Context) {
 		return
 	}
 
-	// manage the secret key and hash it
-	if newUser.SecretKey == "" {
-		newUser.SecretKey = newUser.Password
-	}
-	hashedSecretKey, err := bcrypt.GenerateFromPassword([]byte(newUser.SecretKey), bcrypt.DefaultCost)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not hash secret key"})
-		return
-	}
+	// manage wallet type
+	hashedSecretKey := make([]byte, 0)
+	if newUser.WalletType == NonCustodial {
+
+		// manage the secret key and hash it
+		if newUser.SecretKey == "" {
+			newUser.SecretKey = newUser.Password
+		}
+		hashedSecretKey, err = bcrypt.GenerateFromPassword([]byte(newUser.SecretKey), bcrypt.DefaultCost)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not hash secret key"})
+			return
+		}
+	} // else leave the secret key empty
 
 	// Increment the port counter for each new user, until a running port is found
 	var port int
@@ -405,9 +424,17 @@ func createUserHandler(c *gin.Context) {
 
 	// Create the wallet and fetch the DID
 	data := DIDRequest{
-		Port:      port,
-		SecretKey: string(hashedSecretKey), // pass secret key to encrypt private key
+		Port:       port,
+		WalletType: newUser.WalletType,
+		SecretKey:  string(hashedSecretKey), // pass secret key to encrypt private key
 	}
+
+	// pass the public key, in case of self-custodial wallet
+	if newUser.WalletType == Custodial {
+		data.SecretKey = ""
+		data.PublicKey = newUser.PublicKey
+	}
+
 	walletRequest, err := json.Marshal(data)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error marshaling JSON, " + err.Error()})
@@ -647,12 +674,32 @@ func createWalletHandler(c *gin.Context) {
 		return
 	}
 
-	// Generate mnemonic and derive key pair
-	entropy, _ := bip39.NewEntropy(128)
-	mnemonic, _ := bip39.NewMnemonic(entropy)
-	privateKey, publicKey := generateKeyPair(mnemonic)
+	var entropy []byte
+	var mnemonic, pubKeyStr, encryptedPrivateKey string
+	var err error
 
-	pubKeyStr := hex.EncodeToString(publicKey.SerializeUncompressed())
+	// handle wallet types
+	if req.WalletType == NonCustodial {
+		// Generate mnemonic and derive key pair
+		entropy, _ = bip39.NewEntropy(128)
+		mnemonic, _ = bip39.NewMnemonic(entropy)
+		privateKey, publicKey := generateKeyPair(mnemonic)
+
+		// encrypt private key to store
+		privKeyStr := hex.EncodeToString(privateKey.Serialize())
+		encryptedPrivateKey, err = aesutils.EncryptPrivateKey(privKeyStr, req.SecretKey)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encrypt private key, " + err.Error()})
+			c.Writer.Write([]byte("\n"))
+			return
+		}
+
+		pubKeyStr = hex.EncodeToString(publicKey.SerializeUncompressed())
+	} else {
+		pubKeyStr = req.PublicKey
+	}
+
+	fmt.Println("public key str:", pubKeyStr)
 
 	// Request user DID from Rubix node
 	did, err := didRequest(pubKeyStr, strconv.Itoa(req.Port))
@@ -664,17 +711,8 @@ func createWalletHandler(c *gin.Context) {
 		return
 	}
 
-	// encrypt private key to store
-	privKeyStr := hex.EncodeToString(privateKey.Serialize())
-	encryptedPrivateKey, err := aesutils.EncryptPrivateKey(privKeyStr, req.SecretKey)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encrypt private key, " + err.Error()})
-		c.Writer.Write([]byte("\n"))
-		return
-	}
-
 	// Save user to database
-	err = storage.InsertUser(did, pubKeyStr, encryptedPrivateKey, mnemonic, req.Port)
+	err = storage.InsertUser(did, req.WalletType, pubKeyStr, encryptedPrivateKey, mnemonic, req.Port)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to store user data, " + err.Error()})
 		// Add a newline to the response body
@@ -1114,15 +1152,6 @@ func signTransactionHandler(c *gin.Context) {
 		return
 	}
 
-	// Decode the Base64 string back to the byte array
-	decodedBytes, err := base64.StdEncoding.DecodeString(req.Data.Hash)
-	if err != nil {
-		basicResponse.Message = "Error decoding Base64 string, " + err.Error()
-		c.JSON(http.StatusInternalServerError, basicResponse)
-		c.Writer.Write([]byte("\n"))
-		return
-	}
-
 	user, err := storage.GetUserByDID(req.DID)
 	if err != nil {
 		basicResponse.Message = "User not found, " + err.Error()
@@ -1131,45 +1160,27 @@ func signTransactionHandler(c *gin.Context) {
 		return
 	}
 
-	// Retrieve the hashed secret key from the database for the user
-	var storedHashedSecretKey string
-	var userInfo User
-	row := db.QueryRow("SELECT id, secret_key FROM walletUsers WHERE did = ?", user.DID)
-	err = row.Scan(&userInfo.ID, &storedHashedSecretKey)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "failed to get secret key of user"})
-		return
-	}
 
-	// decrypt the encrypted private key
-	decryptedPrivateKey, err := aesutils.DecryptPrivateKey(user.PrivateKey, storedHashedSecretKey)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to decrypt private key, " + err.Error()})
-		c.Writer.Write([]byte("\n"))
-		return
-	}
-
-	// Decode private key
-	privKeyBytes, err := hex.DecodeString(decryptedPrivateKey)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to decode private key, " + err.Error()})
-		c.Writer.Write([]byte("\n"))
-		return
-	}
-
-	privateKey := secp256k1.PrivKeyFromBytes(privKeyBytes)
-
-	signature, err := signData(privateKey.ToECDSA(), decodedBytes)
-	if err != nil {
-		basicResponse.Message = err.Error()
-		c.JSON(http.StatusInternalServerError, basicResponse)
-		c.Writer.Write([]byte("\n"))
-		return
-	}
-
-	// Verify signature
-	if !verifySignature(user.PublicKey, decodedBytes, signature) {
-		basicResponse.Message = "Signature verification failed"
+	signature := make([]byte, 0)
+	switch user.WalletType {
+	case NonCustodial:
+		signature, err = ServerCustodialSign(user, req.Data.Hash)
+		if err != nil {
+			basicResponse.Message = err.Error()
+			c.JSON(http.StatusInternalServerError, basicResponse)
+			c.Writer.Write([]byte("\n"))
+			return
+		}
+	case Custodial:
+		signature, err = SelfCustodialSign(user, req.Data.Hash)
+		if err != nil {
+			basicResponse.Message = err.Error()
+			c.JSON(http.StatusInternalServerError, basicResponse)
+			c.Writer.Write([]byte("\n"))
+			return
+		}
+	default:
+		basicResponse.Message = "invalid user wallet type"
 		c.JSON(http.StatusInternalServerError, basicResponse)
 		c.Writer.Write([]byte("\n"))
 		return
@@ -1198,6 +1209,92 @@ func signTransactionHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, basicResponse)
 	// Add a newline to the response body if required
 	c.Writer.Write([]byte("\n"))
+}
+
+// sign, when keys are managed by server
+func ServerCustodialSign(user *storage.User, data string) ([]byte, error) {
+	// Retrieve the hashed secret key from the database for the user
+	var storedHashedSecretKey string
+	var userInfo User
+	row := db.QueryRow("SELECT id, secret_key FROM walletUsers WHERE did = ?", user.DID)
+	err := row.Scan(&userInfo.ID, &storedHashedSecretKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get secret key of user, " + err.Error())
+	}
+
+	// decrypt the encrypted private key
+	decryptedPrivateKey, err := aesutils.DecryptPrivateKey(user.PrivateKey, storedHashedSecretKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decrypt private key, " + err.Error())
+	}
+
+	// fmt.Println("private key: ", decryptedPrivateKey)
+	// fmt.Println("public key:", &user.PublicKey)
+	// fmt.Println("msg", data)
+
+	// Decode private key
+	privKeyBytes, err := hex.DecodeString(decryptedPrivateKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode private key," + err.Error())
+	}
+
+	privateKey := secp256k1.PrivKeyFromBytes(privKeyBytes)
+
+	// Decode the Base64 string to byte array
+	dataBytes, err := base64.StdEncoding.DecodeString(data)
+	if err != nil {
+		return nil, fmt.Errorf("Error decoding Base64 string, " + err.Error())
+	}
+
+	signature, err := signData(privateKey.ToECDSA(), dataBytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to sign, " + err.Error())
+	}
+
+	// Verify signature
+	if !verifySignature(user.PublicKey, dataBytes, signature) {
+		return nil, fmt.Errorf("signature verification failed")
+	}
+
+	return signature, nil
+}
+
+// request user to provide the signature on the requested msg
+func SelfCustodialSign(user *storage.User, data string) ([]byte, error) {
+	baseURL := "http://localhost:3000/getsign"
+	params := url.Values{}
+	params.Add("msg", data)
+	params.Add("did", user.DID)
+
+	fullURL := fmt.Sprintf("%s?%s", baseURL, params.Encode())
+
+	resp, err := http.Get(fullURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to request signature: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("error from frontend: %s", resp.Status)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %v", err)
+	}
+
+	// Decode the base64 signature
+	signature, err := base64.StdEncoding.DecodeString(string(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode signature: %v", err)
+	}
+
+	// Verify signature
+	if !verifySignature(user.PublicKey, signature, signature) {
+		return nil, fmt.Errorf("signature verification failed")
+	}
+
+	return signature, nil
 }
 
 // callSignHandler
@@ -1854,7 +1951,7 @@ func signResponse(data SignRespData, rubixNodePort int) (map[string]interface{},
 	respStatus := response["status"].(bool)
 
 	if !respStatus {
-		return nil, fmt.Errorf("failed to send sign response, %s", respMsg)
+		return nil, fmt.Errorf("%s", respMsg)
 	}
 
 	return response, nil
