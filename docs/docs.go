@@ -253,7 +253,7 @@ const docTemplate = `{
                 "summary": "Create a new key pair",
                 "parameters": [
                     {
-                        "description": "Port for DID request",
+                        "description": "Port for DID request and secret key",
                         "name": "request",
                         "in": "body",
                         "required": true,
@@ -1325,6 +1325,52 @@ const docTemplate = `{
                 }
             }
         },
+        "/submit-signed-transaction": {
+            "post": {
+                "description": "Submits a signed transaction response for processing",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Txn"
+                ],
+                "summary": "Submit a signed transaction",
+                "parameters": [
+                    {
+                        "description": "Signed transaction response",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/main.SignRespData"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/main.BasicResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/main.BasicResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/main.BasicResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/subscribe-smart-contract": {
             "post": {
                 "security": [
@@ -1687,6 +1733,15 @@ const docTemplate = `{
                 },
                 "password": {
                     "type": "string"
+                },
+                "public_key": {
+                    "type": "string"
+                },
+                "secret_key": {
+                    "type": "string"
+                },
+                "wallet_type": {
+                    "type": "string"
                 }
             }
         },
@@ -1712,6 +1767,32 @@ const docTemplate = `{
             "properties": {
                 "port": {
                     "type": "integer"
+                },
+                "public_key": {
+                    "type": "string"
+                },
+                "secret_key": {
+                    "type": "string"
+                },
+                "wallet_type": {
+                    "type": "string"
+                }
+            }
+        },
+        "main.DIDSignature": {
+            "type": "object",
+            "properties": {
+                "pixels": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "signature": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
                 }
             }
         },
@@ -1867,8 +1948,28 @@ const docTemplate = `{
                 "did": {
                     "type": "string"
                 },
+                "secret_key": {
+                    "type": "string"
+                },
                 "sign_data": {
                     "$ref": "#/definitions/main.SignReqData"
+                }
+            }
+        },
+        "main.SignRespData": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "mode": {
+                    "type": "integer"
+                },
+                "password": {
+                    "type": "string"
+                },
+                "signature": {
+                    "$ref": "#/definitions/main.DIDSignature"
                 }
             }
         },

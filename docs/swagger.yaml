@@ -36,6 +36,12 @@ definitions:
         type: string
       password:
         type: string
+      public_key:
+        type: string
+      secret_key:
+        type: string
+      wallet_type:
+        type: string
     type: object
   main.DIDPeerMap:
     properties:
@@ -52,6 +58,23 @@ definitions:
     properties:
       port:
         type: integer
+      public_key:
+        type: string
+      secret_key:
+        type: string
+      wallet_type:
+        type: string
+    type: object
+  main.DIDSignature:
+    properties:
+      pixels:
+        items:
+          type: integer
+        type: array
+      signature:
+        items:
+          type: integer
+        type: array
     type: object
   main.DeployNFTRequest:
     properties:
@@ -153,8 +176,21 @@ definitions:
     properties:
       did:
         type: string
+      secret_key:
+        type: string
       sign_data:
         $ref: '#/definitions/main.SignReqData'
+    type: object
+  main.SignRespData:
+    properties:
+      id:
+        type: string
+      mode:
+        type: integer
+      password:
+        type: string
+      signature:
+        $ref: '#/definitions/main.DIDSignature'
     type: object
   main.SubscribeNFTRequest:
     properties:
@@ -372,7 +408,7 @@ paths:
       - application/json
       description: Generates a key pair and assigns a DID
       parameters:
-      - description: Port for DID request
+      - description: Port for DID request and secret key
         in: body
         name: request
         required: true
@@ -1064,6 +1100,36 @@ paths:
       security:
       - BearerAuth: []
       summary: Sign a transaction
+      tags:
+      - Txn
+  /submit-signed-transaction:
+    post:
+      consumes:
+      - application/json
+      description: Submits a signed transaction response for processing
+      parameters:
+      - description: Signed transaction response
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/main.SignRespData'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/main.BasicResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/main.BasicResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/main.BasicResponse'
+      summary: Submit a signed transaction
       tags:
       - Txn
   /subscribe-smart-contract:
