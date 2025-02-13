@@ -943,6 +943,57 @@ const docTemplate = `{
                 }
             }
         },
+        "/pass_signature": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "passes the user signature to the rubix node",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Txn"
+                ],
+                "summary": "pass signature manually",
+                "parameters": [
+                    {
+                        "description": "Signature Response",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/main.PassSignResponse"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/main.BasicResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/main.BasicResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/main.BasicResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/profile": {
             "get": {
                 "security": [
@@ -1318,52 +1369,6 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/main.BasicResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/submit-signed-transaction": {
-            "post": {
-                "description": "Submits a signed transaction response for processing",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Txn"
-                ],
-                "summary": "Submit a signed transaction",
-                "parameters": [
-                    {
-                        "description": "Signed transaction response",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/main.SignRespData"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/main.BasicResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/main.BasicResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/main.BasicResponse"
                         }
@@ -1911,6 +1916,17 @@ const docTemplate = `{
                 },
                 "password": {
                     "type": "string"
+                }
+            }
+        },
+        "main.PassSignResponse": {
+            "type": "object",
+            "properties": {
+                "did": {
+                    "type": "string"
+                },
+                "sign_response": {
+                    "$ref": "#/definitions/main.SignRespData"
                 }
             }
         },

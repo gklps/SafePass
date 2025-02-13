@@ -154,6 +154,13 @@ definitions:
       password:
         type: string
     type: object
+  main.PassSignResponse:
+    properties:
+      did:
+        type: string
+      sign_response:
+        $ref: '#/definitions/main.SignRespData'
+    type: object
   main.ReqToRubixNode:
     properties:
       did:
@@ -859,6 +866,38 @@ paths:
       summary: Login user and get JWT token
       tags:
       - Auth
+  /pass_signature:
+    post:
+      consumes:
+      - application/json
+      description: passes the user signature to the rubix node
+      parameters:
+      - description: Signature Response
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/main.PassSignResponse'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/main.BasicResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/main.BasicResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/main.BasicResponse'
+      security:
+      - BearerAuth: []
+      summary: pass signature manually
+      tags:
+      - Txn
   /profile:
     get:
       consumes:
@@ -1100,36 +1139,6 @@ paths:
       security:
       - BearerAuth: []
       summary: Sign a transaction
-      tags:
-      - Txn
-  /submit-signed-transaction:
-    post:
-      consumes:
-      - application/json
-      description: Submits a signed transaction response for processing
-      parameters:
-      - description: Signed transaction response
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/main.SignRespData'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/main.BasicResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/main.BasicResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/main.BasicResponse'
-      summary: Submit a signed transaction
       tags:
       - Txn
   /subscribe-smart-contract:

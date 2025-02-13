@@ -15,7 +15,6 @@ import (
 	"mime/multipart"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -106,6 +105,11 @@ type SignRespData struct {
 	Mode      int          `json:"mode"`
 	Password  string       `json:"password"`
 	Signature DIDSignature `json:"signature"`
+}
+
+type PassSignResponse struct {
+	DID          string `json:"did"`
+	SignRespData `json:"sign_response"`
 }
 
 type DIDSignature struct {
@@ -278,6 +282,7 @@ func main() {
 	r.POST("/request_txn", requestTransactionHandler)
 	r.GET("/txn/by_did", getTxnByDIDHandler)
 	r.POST("/sign", signTransactionHandler)
+	r.POST("/pass_signature", PassSignatureHandler)
 	//FT features
 	r.POST("/create_ft", createFTHandler)
 	r.POST("/transfer_ft", transferFTHandler)
@@ -1160,7 +1165,6 @@ func signTransactionHandler(c *gin.Context) {
 		return
 	}
 
-
 	signature := make([]byte, 0)
 	switch user.WalletType {
 	case NonCustodial:
@@ -1172,13 +1176,13 @@ func signTransactionHandler(c *gin.Context) {
 			return
 		}
 	case Custodial:
-		signature, err = SelfCustodialSign(user, req.Data.Hash)
-		if err != nil {
-			basicResponse.Message = err.Error()
-			c.JSON(http.StatusInternalServerError, basicResponse)
-			c.Writer.Write([]byte("\n"))
-			return
-		}
+		basicResponse.Status = true
+		basicResponse.Message = "Signature needed"
+		basicResponse.Result = SignRequest{DID: req.DID, Data: req.Data}
+		c.JSON(http.StatusOK, basicResponse)
+		c.Writer.Write([]byte("\n"))
+		return
+
 	default:
 		basicResponse.Message = "invalid user wallet type"
 		c.JSON(http.StatusInternalServerError, basicResponse)
@@ -1259,42 +1263,90 @@ func ServerCustodialSign(user *storage.User, data string) ([]byte, error) {
 	return signature, nil
 }
 
-// request user to provide the signature on the requested msg
-func SelfCustodialSign(user *storage.User, data string) ([]byte, error) {
-	baseURL := "http://localhost:3000/getsign"
-	params := url.Values{}
-	params.Add("msg", data)
-	params.Add("did", user.DID)
+// @Summary pass signature manually
+// @Description passes the user signature to the rubix node
+// @Tags Txn
+// @Accept json
+// @Produce json
+// @Param request body PassSignResponse true "Signature Response"
+// @Success 200 {object} BasicResponse
+// @Failure 400 {object} BasicResponse
+// @Failure 401 {object} BasicResponse
+// @Security BearerAuth
+// @Router /pass_signature [post]
+func PassSignatureHandler(c *gin.Context) {
+	basicResponse := BasicResponse{
+		Status: false,
+	}
+	tokenString := c.GetHeader("Authorization")
+	if tokenString == "" {
+		basicResponse.Message = "Token is required"
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
+		c.Abort()
+		return
+	}
 
-	fullURL := fmt.Sprintf("%s?%s", baseURL, params.Encode())
+	tokenString = tokenString[len("Bearer "):]
 
-	resp, err := http.Get(fullURL)
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("Unexpected signing method")
+		}
+		return jwtSecret, nil
+	})
+
+	if err != nil || !token.Valid {
+		basicResponse.Message = "Invalid token, " + err.Error()
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
+		c.Abort()
+		return
+	}
+
+	// Extract the DID claim from the token
+	claims := token.Claims.(jwt.MapClaims)
+	did, ok := claims["sub"].(string)
+	if !ok {
+		basicResponse.Message = "Invalid token: missing or invalid DID"
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
+		return
+	}
+
+	// verify the DID exists in the database
+	user, err := storage.GetUserByDID(did)
 	if err != nil {
-		return nil, fmt.Errorf("failed to request signature: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("error from frontend: %s", resp.Status)
+		basicResponse.Message = "User not found, " + err.Error()
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
+		return
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	var signResp PassSignResponse
+	if err := c.ShouldBindJSON(&signResp); err != nil {
+		basicResponse.Message = "Invalid input, " + err.Error()
+		c.JSON(http.StatusBadRequest, basicResponse)
+		c.Writer.Write([]byte("\n"))
+		return
+	}
+
+	resp, err := signResponse(signResp.SignRespData, user.Port)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %v", err)
+		basicResponse.Message = err.Error()
+		c.JSON(http.StatusInternalServerError, basicResponse)
+		c.Writer.Write([]byte("\n"))
+		return
 	}
 
-	// Decode the base64 signature
-	signature, err := base64.StdEncoding.DecodeString(string(body))
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode signature: %v", err)
-	}
+	// prepare response
+	basicResponse.Status = resp["status"].(bool)
+	basicResponse.Message = resp["message"].(string) // if the mesaage says "Signature needed" the user should
+	basicResponse.Result = resp["result"]            // provide the signature again on the hash provided under result
+	c.JSON(http.StatusOK, basicResponse)
+	// Add a newline to the response body if required
+	c.Writer.Write([]byte("\n"))
 
-	// Verify signature
-	if !verifySignature(user.PublicKey, signature, signature) {
-		return nil, fmt.Errorf("signature verification failed")
-	}
-
-	return signature, nil
 }
 
 // callSignHandler
