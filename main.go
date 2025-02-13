@@ -1181,11 +1181,7 @@ func signTransactionHandler(c *gin.Context) {
 		result["result"] = req.Data
 		basicResponse.Status = true
 		basicResponse.Message = "Signature needed"
-		basicResponse.Result = map[string]interface{}{
-			"id":   req.Data.ID,
-			"mode": req.Data.Mode,
-			"hash": req.Data.Hash,
-		}
+		basicResponse.Result = result
 		c.JSON(http.StatusOK, basicResponse)
 		c.Writer.Write([]byte("\n"))
 		return
@@ -1358,10 +1354,7 @@ func PassSignatureHandler(c *gin.Context) {
 
 // callSignHandler
 func callSignHandler(response map[string]interface{}, did string) (string, error) {
-	respResult, ok := response["result"].(map[string]interface{})
-	if !ok || respResult == nil {
-		return "", fmt.Errorf("invalid response: 'result' field is missing or not a map")
-	}
+	respResult := response["result"].(map[string]interface{})
 	hashStr := respResult["hash"].(string)
 	id := respResult["id"].(string)
 	mode := respResult["mode"].(float64)
