@@ -821,7 +821,7 @@ func registerDIDHandler(c *gin.Context) {
 	respMsg := response["message"].(string)
 	// sign, if the message says 'signature needed'
 	if strings.Contains(respMsg, "Signature needed") {
-		respMsg, err = callSignHandler(response, did)
+		response, err = callSignHandler(response, did)
 		if err != nil {
 			basicResponse.Message = err.Error()
 			c.JSON(http.StatusInternalServerError, basicResponse)
@@ -829,6 +829,7 @@ func registerDIDHandler(c *gin.Context) {
 			c.Writer.Write([]byte("\n"))
 			return
 		}
+		respMsg = response["message"].(string)
 	} else {
 		basicResponse.Status = response["status"].(bool)
 		basicResponse.Message = respMsg
@@ -841,6 +842,13 @@ func registerDIDHandler(c *gin.Context) {
 	// prepare response
 	basicResponse.Status = true
 	basicResponse.Message = respMsg
+	result, ok := response["result"].(map[string]interface{})
+	if !ok || result == nil {
+		basicResponse.Result = nil
+	} else {
+		basicResponse.Result = result
+	}
+
 	c.JSON(http.StatusOK, basicResponse)
 	// Add a newline to the response body if required
 	c.Writer.Write([]byte("\n"))
@@ -1180,7 +1188,7 @@ func signTransactionHandler(c *gin.Context) {
 		result["did"] = req.DID
 		result["result"] = req.Data
 		basicResponse.Status = true
-		basicResponse.Message = "Signature needed"
+		basicResponse.Message = "Signature needed - custodial"
 		basicResponse.Result = result
 		c.JSON(http.StatusOK, basicResponse)
 		c.Writer.Write([]byte("\n"))
@@ -1353,7 +1361,7 @@ func PassSignatureHandler(c *gin.Context) {
 }
 
 // callSignHandler
-func callSignHandler(response map[string]interface{}, did string) (string, error) {
+func callSignHandler(response map[string]interface{}, did string) (map[string]interface{}, error) {
 	respResult := response["result"].(map[string]interface{})
 	hashStr := respResult["hash"].(string)
 	id := respResult["id"].(string)
@@ -1374,18 +1382,18 @@ func callSignHandler(response map[string]interface{}, did string) (string, error
 	bodyJSON, err := json.Marshal(signReq)
 	if err != nil {
 		fmt.Println("error marshalling:", err.Error())
-		return "", err
+		return nil, err
 	}
 
 	resp, err := http.Post("http://localhost:8080/sign", "application/json", bytes.NewBuffer(bodyJSON))
 	if err != nil {
 		log.Printf("HTTP request error: %v", err)
-		return "", err
+		return nil, err
 	}
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		log.Printf("Unexpected response from /sign: %s", body)
-		return "", fmt.Errorf("Unexpected response from /sign: %s", body)
+		return nil, fmt.Errorf("Unexpected response from /sign: %s", body)
 	}
 	defer resp.Body.Close()
 
@@ -1393,11 +1401,11 @@ func callSignHandler(response map[string]interface{}, did string) (string, error
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		log.Printf("Error reading response body: %v", err)
-		return "", err
+		return nil, err
 	}
 
 	if len(body) == 0 {
-		return "", fmt.Errorf("empty response from /sign")
+		return nil, fmt.Errorf("empty response from /sign")
 	}
 
 	// Parse the response into a map
@@ -1405,17 +1413,19 @@ func callSignHandler(response map[string]interface{}, did string) (string, error
 	err = json.Unmarshal(body, &result)
 	if err != nil {
 		fmt.Println("Error unmarshaling response:", err)
-		return "", err
+		return nil, err
 	}
 
 	respMsg := result["message"].(string)
 
 	// sign again, if the message says 'signature needed'
-	if strings.Contains(respMsg, "Signature needed") {
-		respMsg, err = callSignHandler(result, did)
+	if strings.Contains(respMsg, "Signature needed - custodial") {
+		return result, nil
+	} else if strings.Contains(respMsg, "Signature needed") {
+		response, err = callSignHandler(result, did)
 	}
 
-	return fmt.Sprintf("%s", respMsg), nil
+	return response, nil
 }
 
 // @Summary Request a transaction
@@ -1516,7 +1526,7 @@ func requestTransactionHandler(c *gin.Context) {
 	respMsg := response["message"].(string)
 	// sign, if the message says 'signature needed'
 	if strings.Contains(respMsg, "Signature needed") {
-		respMsg, err = callSignHandler(response, did)
+		response, err = callSignHandler(response, did)
 		if err != nil {
 			basicResponse.Message = err.Error()
 			c.JSON(http.StatusInternalServerError, basicResponse)
@@ -1524,6 +1534,7 @@ func requestTransactionHandler(c *gin.Context) {
 			c.Writer.Write([]byte("\n"))
 			return
 		}
+		respMsg = response["message"].(string)
 	} else {
 		basicResponse.Status = response["status"].(bool)
 		basicResponse.Message = respMsg
@@ -1536,6 +1547,13 @@ func requestTransactionHandler(c *gin.Context) {
 	// prepare response
 	basicResponse.Status = true
 	basicResponse.Message = respMsg
+	result, ok := response["result"].(map[string]interface{})
+	if !ok || result == nil {
+		basicResponse.Result = nil
+	} else {
+		basicResponse.Result = result
+	}
+
 	c.JSON(http.StatusOK, basicResponse)
 	// Add a newline to the response body if required
 	c.Writer.Write([]byte("\n"))
@@ -1727,7 +1745,7 @@ func createTestRBTHandler(c *gin.Context) {
 	respMsg := response["message"].(string)
 	// sign, if the message says 'signature needed'
 	if strings.Contains(respMsg, "Signature needed") {
-		respMsg, err = callSignHandler(response, did)
+		response, err = callSignHandler(response, did)
 		if err != nil {
 			basicResponse.Message = err.Error()
 			c.JSON(http.StatusInternalServerError, basicResponse)
@@ -1735,6 +1753,7 @@ func createTestRBTHandler(c *gin.Context) {
 			c.Writer.Write([]byte("\n"))
 			return
 		}
+		respMsg = response["message"].(string)
 	} else {
 		basicResponse.Status = response["status"].(bool)
 		basicResponse.Message = respMsg
@@ -1747,6 +1766,13 @@ func createTestRBTHandler(c *gin.Context) {
 	// prepare response
 	basicResponse.Status = true
 	basicResponse.Message = respMsg
+	result, ok := response["result"].(map[string]interface{})
+	if !ok || result == nil {
+		basicResponse.Result = nil
+	} else {
+		basicResponse.Result = result
+	}
+
 	c.JSON(http.StatusOK, basicResponse)
 	// Add a newline to the response body if required
 	c.Writer.Write([]byte("\n"))
@@ -2422,7 +2448,7 @@ func createFTHandler(c *gin.Context) {
 	respMsg := response["message"].(string)
 	// sign, if the message says 'signature needed'
 	if strings.Contains(respMsg, "Signature needed") {
-		respMsg, err = callSignHandler(response, did)
+		response, err = callSignHandler(response, did)
 		if err != nil {
 			basicResponse.Message = err.Error()
 			c.JSON(http.StatusInternalServerError, basicResponse)
@@ -2430,6 +2456,7 @@ func createFTHandler(c *gin.Context) {
 			c.Writer.Write([]byte("\n"))
 			return
 		}
+		respMsg = response["message"].(string)
 	} else {
 		basicResponse.Status = response["status"].(bool)
 		basicResponse.Message = respMsg
@@ -2442,6 +2469,13 @@ func createFTHandler(c *gin.Context) {
 	// prepare response
 	basicResponse.Status = true
 	basicResponse.Message = respMsg
+	result, ok := response["result"].(map[string]interface{})
+	if !ok || result == nil {
+		basicResponse.Result = nil
+	} else {
+		basicResponse.Result = result
+	}
+
 	c.JSON(http.StatusOK, basicResponse)
 	// Add a newline to the response body if required
 	c.Writer.Write([]byte("\n"))
@@ -2584,7 +2618,7 @@ func transferFTHandler(c *gin.Context) {
 	respMsg := response["message"].(string)
 	// sign, if the message says 'signature needed'
 	if strings.Contains(respMsg, "Signature needed") {
-		respMsg, err = callSignHandler(response, did)
+		response, err = callSignHandler(response, did)
 		if err != nil {
 			basicResponse.Message = err.Error()
 			c.JSON(http.StatusInternalServerError, basicResponse)
@@ -2592,6 +2626,7 @@ func transferFTHandler(c *gin.Context) {
 			c.Writer.Write([]byte("\n"))
 			return
 		}
+		respMsg = response["message"].(string)
 	} else {
 		basicResponse.Status = response["status"].(bool)
 		basicResponse.Message = respMsg
@@ -2604,6 +2639,13 @@ func transferFTHandler(c *gin.Context) {
 	// prepare response
 	basicResponse.Status = true
 	basicResponse.Message = respMsg
+	result, ok := response["result"].(map[string]interface{})
+	if !ok || result == nil {
+		basicResponse.Result = nil
+	} else {
+		basicResponse.Result = result
+	}
+
 	c.JSON(http.StatusOK, basicResponse)
 	// Add a newline to the response body if required
 	c.Writer.Write([]byte("\n"))
@@ -3351,7 +3393,7 @@ func deployNFTHandler(c *gin.Context) {
 	respMsg := response["message"].(string)
 	// sign, if the message says 'signature needed'
 	if strings.Contains(respMsg, "Signature needed") {
-		respMsg, err = callSignHandler(response, did)
+		response, err = callSignHandler(response, did)
 		if err != nil {
 			basicResponse.Message = err.Error()
 			c.JSON(http.StatusInternalServerError, basicResponse)
@@ -3359,6 +3401,7 @@ func deployNFTHandler(c *gin.Context) {
 			c.Writer.Write([]byte("\n"))
 			return
 		}
+		respMsg = response["message"].(string)
 	} else {
 		basicResponse.Status = response["status"].(bool)
 		basicResponse.Message = respMsg
@@ -3371,6 +3414,13 @@ func deployNFTHandler(c *gin.Context) {
 	// prepare response
 	basicResponse.Status = true
 	basicResponse.Message = respMsg
+	result, ok := response["result"].(map[string]interface{})
+	if !ok || result == nil {
+		basicResponse.Result = nil
+	} else {
+		basicResponse.Result = result
+	}
+
 	c.JSON(http.StatusOK, basicResponse)
 	// Add a newline to the response body if required
 	c.Writer.Write([]byte("\n"))
@@ -3513,7 +3563,7 @@ func executeNFTHandler(c *gin.Context) {
 	respMsg := response["message"].(string)
 	// sign, if the message says 'signature needed'
 	if strings.Contains(respMsg, "Signature needed") {
-		respMsg, err = callSignHandler(response, did)
+		response, err = callSignHandler(response, did)
 		if err != nil {
 			basicResponse.Message = err.Error()
 			c.JSON(http.StatusInternalServerError, basicResponse)
@@ -3521,6 +3571,7 @@ func executeNFTHandler(c *gin.Context) {
 			c.Writer.Write([]byte("\n"))
 			return
 		}
+		respMsg = response["message"].(string)
 	} else {
 		basicResponse.Status = response["status"].(bool)
 		basicResponse.Message = respMsg
@@ -3533,6 +3584,13 @@ func executeNFTHandler(c *gin.Context) {
 	// prepare response
 	basicResponse.Status = true
 	basicResponse.Message = respMsg
+	result, ok := response["result"].(map[string]interface{})
+	if !ok || result == nil {
+		basicResponse.Result = nil
+	} else {
+		basicResponse.Result = result
+	}
+
 	c.JSON(http.StatusOK, basicResponse)
 	// Add a newline to the response body if required
 	c.Writer.Write([]byte("\n"))
@@ -4075,7 +4133,7 @@ func deploySmartContractHandler(c *gin.Context) {
 	respMsg := response["message"].(string)
 	// sign, if the message says 'signature needed'
 	if strings.Contains(respMsg, "Signature needed") {
-		respMsg, err = callSignHandler(response, req.DeployerAddr)
+		response, err = callSignHandler(response, req.DeployerAddr)
 		if err != nil {
 			basicResponse.Message = err.Error()
 			c.JSON(http.StatusInternalServerError, basicResponse)
@@ -4083,6 +4141,7 @@ func deploySmartContractHandler(c *gin.Context) {
 			c.Writer.Write([]byte("\n"))
 			return
 		}
+		respMsg = response["message"].(string)
 	} else {
 		basicResponse.Status = response["status"].(bool)
 		basicResponse.Message = respMsg
@@ -4095,6 +4154,13 @@ func deploySmartContractHandler(c *gin.Context) {
 	//prepare response
 	basicResponse.Status = true
 	basicResponse.Message = respMsg
+	result, ok := response["result"].(map[string]interface{})
+	if !ok || result == nil {
+		basicResponse.Result = nil
+	} else {
+		basicResponse.Result = result
+	}
+
 	c.JSON(http.StatusOK, basicResponse)
 	c.Writer.Write([]byte("\n"))
 }
@@ -4520,7 +4586,7 @@ func executeSmartContractHandler(c *gin.Context) {
 	respMsg := response["message"].(string)
 	// sign, if the message says 'signature needed'
 	if strings.Contains(respMsg, "Signature needed") {
-		respMsg, err = callSignHandler(response, req.ExecutorAddr)
+		response, err = callSignHandler(response, req.ExecutorAddr)
 		if err != nil {
 			basicResponse.Message = err.Error()
 			c.JSON(http.StatusInternalServerError, basicResponse)
@@ -4528,6 +4594,7 @@ func executeSmartContractHandler(c *gin.Context) {
 			c.Writer.Write([]byte("\n"))
 			return
 		}
+		respMsg = response["message"].(string)
 	} else {
 		basicResponse.Status = response["status"].(bool)
 		basicResponse.Message = respMsg
@@ -4540,6 +4607,13 @@ func executeSmartContractHandler(c *gin.Context) {
 	// prepare response
 	basicResponse.Status = true
 	basicResponse.Message = respMsg
+	result, ok := response["result"].(map[string]interface{})
+	if !ok || result == nil {
+		basicResponse.Result = nil
+	} else {
+		basicResponse.Result = result
+	}
+
 	c.JSON(http.StatusOK, basicResponse)
 	c.Writer.Write([]byte("\n"))
 }
