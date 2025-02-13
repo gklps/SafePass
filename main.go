@@ -1186,7 +1186,7 @@ func signTransactionHandler(c *gin.Context) {
 	case Custodial:
 		result := make(map[string]interface{})
 		result["did"] = req.DID
-		result["result"] = req.Data
+		result["sign_data"] = req.Data
 		basicResponse.Status = true
 		basicResponse.Message = "Signature needed - custodial"
 		basicResponse.Result = result
@@ -1342,6 +1342,14 @@ func PassSignatureHandler(c *gin.Context) {
 		return
 	}
 
+	// Ensure the DID from the token matches the one in the request body
+	if signResp.DID != did {
+		basicResponse.Message = "DID mismatch"
+		c.JSON(http.StatusForbidden, basicResponse)
+		c.Writer.Write([]byte("\n"))
+		return
+	}
+
 	resp, err := signResponse(signResp.SignRespData, user.Port)
 	if err != nil {
 		basicResponse.Message = err.Error()
@@ -1422,10 +1430,10 @@ func callSignHandler(response map[string]interface{}, did string) (map[string]in
 	if strings.Contains(respMsg, "Signature needed - custodial") {
 		return result, nil
 	} else if strings.Contains(respMsg, "Signature needed") {
-		response, err = callSignHandler(result, did)
+		result, err = callSignHandler(result, did)
 	}
 
-	return response, nil
+	return result, nil
 }
 
 // @Summary Request a transaction

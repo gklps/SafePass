@@ -232,6 +232,57 @@ curl -X POST http://localhost:8080/sign -d '{"did":"bafybmiaysyb5hbdb6clsk7jncde
 ```
 
 
+### Curl request to pass signature
+```
+curl -L -X POST http://localhost:8080/pass_signature -H 'Authorization: Bearer <jwt token returned while logging in>' -d '{
+    "did":"<sender DID>",
+    "sign_response" : {
+        "id" : “<string>”,
+        "mode" : 4,
+        "signature" : {
+            “Signature” : <[]byte>
+        }
+    }
+}'
+
+```
+#### sample with valid request 
+```
+curl -L -X POST http://localhost:8080/pass_signature -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3Mzk2OTUxNzIsInN1YiI6ImJhZnlibWlhdHc1c3JncWx3M3Q1c200YnVrdHU1Z2NnYmZoa2d1am9oZW0zbzNhNGN1c3Z0NDI0c2VpIn0.PfSjm9hnd-qsOPU0Zyb-hx3pum-3uuD8XANu60c_ImY' -d '{
+    "did":"bafybmiatw5srgqlw3t5sm4buktu5gcgbfhkgujohem3o3a4cusvt424sei",
+    "sign_response" : {
+        "id" : "6EE13B95-0303-4E18-AF85-83CD3CC74F9A",
+        "mode" : 4,
+        "signature" : {
+            "Signature" : [ 48,  68,   2,  32,  60,  74, 170,  87, 228, 252, 240,  88, 9, 110, 250, 141, 253,  67,   6,  21, 205,  49, 113, 148, 151, 243, 134,  57,  77, 163, 152,  29, 132, 143,  64,  38, 2,  32,  82,  84, 245, 112,  12, 104,  83,  84, 153, 173, 216, 251,  15, 246,  13, 104,  33,  99, 199, 232,  43, 114, 114, 244,  79,  50, 255, 242, 143, 112, 210, 107 ]
+        }
+    }
+}'
+```
+**Response:**
+(While registering DID)
+```
+{"status":true,"message":"DID registered successfully","result":null}
+```
+#### sample with invalid request (invalid did)
+```
+curl -L -X POST http://localhost:8080/pass_signature -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3Mzk2OTUxNzIsInN1YiI6ImJhZnlibWlhdHc1c3JncWx3M3Q1c200YnVrdHU1Z2NnYmZoa2d1am9oZW0zbzNhNGN1c3Z0NDI0c2VpIn0.PfSjm9hnd-qsOPU0Zyb-hx3pum-3uuD8XANu60c_ImY' -d '{
+    "did":"bafybmihtgzrqrfqawsxrijfcccb4ow7yjni4x3pav45mgkgi5fh7wjivse",
+    "sign_response" : {
+        "id" : "6EE13B95-0303-4E18-AF85-83CD3CC74F9A",
+        "mode" : 4,
+        "signature" : {
+            "Signature" : [ 48,  68,   2,  32,  60,  74, 170,  87, 228, 252, 240,  88, 9, 110, 250, 141, 253,  67,   6,  21, 205,  49, 113, 148, 151, 243, 134,  57,  77, 163, 152,  29, 132, 143,  64,  38, 2,  32,  82,  84, 245, 112,  12, 104,  83,  84, 153, 173, 216, 251,  15, 246,  13, 104,  33,  99, 199, 232,  43, 114, 114, 244,  79,  50, 255, 242, 143, 112, 210, 107 ]
+        }
+    }
+}'
+```
+**Response:**
+```
+{"status":false,"message":"DID mismatch","result":null}
+```
+
+
 ### Curl request to transfer RBTs
 ```
 curl -L -X POST http://localhost:8080/request_txn -H 'Authorization: Bearer <jwt token returned while logging in>' -d '{"did":"<sender DID>","receiver":"<receiver DID>", "rbt_amount":<transaction amount in float>}'
