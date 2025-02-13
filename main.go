@@ -1176,9 +1176,12 @@ func signTransactionHandler(c *gin.Context) {
 			return
 		}
 	case Custodial:
+		result := make(map[string]interface{})
+		result["did"] = req.DID
+		result["result"] = req.Data
 		basicResponse.Status = true
 		basicResponse.Message = "Signature needed"
-		basicResponse.Result = SignRequest{DID: req.DID, Data: req.Data}
+		basicResponse.Result = result
 		c.JSON(http.StatusOK, basicResponse)
 		c.Writer.Write([]byte("\n"))
 		return
