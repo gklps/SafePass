@@ -285,15 +285,15 @@ curl -L -X POST http://localhost:8080/pass_signature -H 'Authorization: Bearer e
 
 ### Curl request to transfer RBTs
 ```
-curl -L -X POST http://localhost:8080/request_txn -H 'Authorization: Bearer <jwt token returned while logging in>' -d '{"did":"<sender DID>","receiver":"<receiver DID>", "rbt_amount":<transaction amount in float>}'
+curl -L -X POST http://localhost:8080/request_txn -H 'Authorization: Bearer <jwt token returned while logging in>' -d '{"did":"<sender DID>","receiver":"<receiver DID>", "rbt_amount":<transaction amount in float>, "comment":"<comment (optional)>", "quorum_type":<1 or 2 (optional, default:2)>, "password":"<(optional)>"}'
 ```
 #### sample with valid request 
 ```
-curl -L -X POST http://localhost:8080/request_txn -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3Mzc3MjExODgsInN1YiI6ImJhZnlibWlheXN5YjVoYmRiNmNsc2s3am5jZGVqeHdvbXh1bXYzem9zNXQ1N2Y2Ynd6N251bXZhaW5hIn0.WU8P4UJiq-Jap_NhmHONhCah6d5xtoL6lHaH6ceUFJ4' -d '{"did":"bafybmiaysyb5hbdb6clsk7jncdejxwomxumv3zos5t57f6bwz7numvaina","receiver":"bafybmifqpi36mvzocqqpsh3rtjrjy5434wlqv4nz7zr4ejqx3qul5gl36q", "rbt_amount":1.0}'
+curl -L -X POST http://localhost:8080/request_txn -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3NDAwNDU0NjksInN1YiI6ImJhZnlibWlhZjJ5M2trbWQ3N2U0aHhwMnllZTJtaGlxdW9jNWh5cjRtanlhMnNhNWhjY25ubWs0YmNpIn0.yRUm7xC7SZpIdCAGBuURTOi-FE3Jf0Gv_pWXPbt_NYE' -d '{"did":"bafybmiaf2y3kkmd77e4hxp2yee2mhiquoc5hyr4mjya2sa5hccnnmk4bci","receiver":"bafybmidqkq6vg7he5sfsk4rj4duzjxsmr7mrjaxvcjblppwj5doip6kw7a", "rbt_amount":1, "comment":"test comment-1",  "quorum_type":2}'
 ```
 **Response:**
 ```
-{"status":true,"message":"Transfer finished successfully in 14.059856393s with trnxid d5e06dbdb20e235031afdbc958fe153357ee748dcb79d3b50d49a6f0413d39e4","result":null}
+{"status":true,"message":"Transfer finished successfully in 49.178497411s with trnxid c0b928f4e1030692c90b5ea1e36174f7cf1db4cbc08fa0eb44254e88982f590e","result":null}
 ```
 #### sample with invalid request (invalid rbt_amount)
 ```

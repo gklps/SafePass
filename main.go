@@ -123,6 +123,9 @@ type TxnRequest struct {
 	DID           string  `json:"did"`
 	ReceiverDID   string  `json:"receiver"`
 	RBTAmount     float64 `json:"rbt_amount"`
+	Comment       string  `json:"comment"`
+	QuorumType    int     `json:"quorum_type"`
+	Password      string  `json:"password"`
 }
 
 // request to rubix node
@@ -605,11 +608,14 @@ func InitJWT(database *sql.DB, secret []byte) {
 }
 
 // generate JWT
-func GenerateJWT(did string, receiverDID string, amount float64) (string, error) {
+func GenerateJWT(req TxnRequest) (string, error) {
 	claims := jwt.MapClaims{
-		"did":          did,
-		"receiver_did": receiverDID,
-		"rbt_amount":   amount,
+		"did":          req.DID,
+		"receiver_did": req.ReceiverDID,
+		"rbt_amount":   req.RBTAmount,
+		"comment":      req.Comment,
+		"quorum_type":  req.QuorumType,
+		"password":     req.Password,
 		"iat":          time.Now().Unix(),
 		"exp":          time.Now().Add(time.Hour * 24).Unix(),
 	}
@@ -629,7 +635,7 @@ func GenerateJWT(did string, receiverDID string, amount float64) (string, error)
 	// Save token to database
 	_, err = db.Exec(
 		"INSERT INTO jwt_tokens (did, token, issued_at, expires_at) VALUES (?, ?, ?, ?)",
-		did, tokenString, claims["iat"], claims["exp"],
+		req.DID, tokenString, claims["iat"], claims["exp"],
 	)
 	if err != nil {
 		return "", err
@@ -1513,7 +1519,7 @@ func requestTransactionHandler(c *gin.Context) {
 		return
 	}
 
-	jwtToken, err := GenerateJWT(req.DID, req.ReceiverDID, req.RBTAmount)
+	jwtToken, err := GenerateJWT(req)
 	if err != nil {
 		basicResponse.Message = "Failed to generate JWT, " + err.Error()
 		c.JSON(http.StatusInternalServerError, basicResponse)
