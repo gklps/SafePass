@@ -2051,11 +2051,20 @@ const docTemplate = `{
         "main.TxnRequest": {
             "type": "object",
             "properties": {
+                "comment": {
+                    "type": "string"
+                },
                 "did": {
+                    "type": "string"
+                },
+                "password": {
                     "type": "string"
                 },
                 "port": {
                     "type": "string"
+                },
+                "quorum_type": {
+                    "type": "integer"
                 },
                 "rbt_amount": {
                     "type": "number"

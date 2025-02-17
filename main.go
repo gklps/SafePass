@@ -609,6 +609,9 @@ func InitJWT(database *sql.DB, secret []byte) {
 
 // generate JWT
 func GenerateJWT(req TxnRequest) (string, error) {
+	if req.QuorumType != 1 && req.QuorumType != 2 {
+		req.QuorumType = 2
+	}
 	claims := jwt.MapClaims{
 		"did":          req.DID,
 		"receiver_did": req.ReceiverDID,
