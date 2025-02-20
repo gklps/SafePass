@@ -1853,49 +1853,111 @@ func getTxnByDIDHandler(c *gin.Context) {
 	// Optionally, verify the DID exists in the database
 	user, err := storage.GetUserByDID(did)
 	if err != nil {
-		basicResponse.Message = "User nopt found, " + err.Error()
+		basicResponse.Message = "User not found, " + err.Error()
 		c.JSON(http.StatusUnauthorized, basicResponse)
 		c.Writer.Write([]byte("\n"))
 		return
 	}
 
+	// Get Query Params
 	userDID := c.Query("did")
+	role := c.Query("role")
+	startDateStr := c.Query("StartDate")
+	endDateStr := c.Query("EndDate")
 
+	// **DID is Mandatory**
 	if userDID == "" {
 		basicResponse.Message = "Missing required parameter: did"
-		c.JSON(http.StatusInternalServerError, basicResponse)
-		c.Writer.Write([]byte("\n"))
+		c.JSON(http.StatusBadRequest, basicResponse)
 		return
 	}
 
-	// Ensure the DID from the token matches the one in the request body
+	// **Ensure Requesting DID Matches JWT DID**
 	if userDID != did {
 		basicResponse.Message = "DID mismatch"
 		c.JSON(http.StatusForbidden, basicResponse)
-		c.Writer.Write([]byte("\n"))
 		return
 	}
 
-	role := c.Query("role")
-	startDate := c.Query("StartDate")
-	endDate := c.Query("EndDate")
+	// **Validate Optional Role**
+	if role != "" && role != "Sender" && role != "Receiver" {
+		basicResponse.Message = "Invalid role, must be either 'Sender' or 'Receiver'"
+		c.JSON(http.StatusBadRequest, basicResponse)
+		return
+	}
 
-	result, err := RequestTxnsByDID(did, role, startDate, endDate, strconv.Itoa(user.Port))
+	// **Validate Optional Dates**
+	var startDate, endDate time.Time
+	startDateSet, endDateSet := false, false
+
+	if startDateStr != "" {
+		startDate, err = time.Parse("2006-01-02", startDateStr)
+		if err != nil {
+			basicResponse.Message = "Invalid StartDate format, expected YYYY-MM-DD"
+			c.JSON(http.StatusBadRequest, basicResponse)
+			return
+		}
+		startDateSet = true
+	}
+
+	if endDateStr != "" {
+		endDate, err = time.Parse("2006-01-02", endDateStr)
+		if err != nil {
+			basicResponse.Message = "Invalid EndDate format, expected YYYY-MM-DD"
+			c.JSON(http.StatusBadRequest, basicResponse)
+			return
+		}
+		endDateSet = true
+	}
+
+	// **Call the Rubix Node**
+	result, err := RequestTxnsByDID(userDID, role, startDateStr, endDateStr, strconv.Itoa(user.Port))
 	if err != nil {
 		basicResponse.Message = err.Error()
 		c.JSON(http.StatusBadRequest, basicResponse)
-		// Add a newline to the response body if required
-		c.Writer.Write([]byte("\n"))
 		return
 	}
 
-	// prepare response
-	basicResponse.Status = result["status"].(bool)
-	basicResponse.Message = result["message"].(string)
-	basicResponse.Result = result["TxnDetails"]
+	// **Apply Filtering (If Needed)**
+	var filteredTxns []map[string]interface{}
+
+	// Ensure "TxnDetails" Exists
+	if txnDetails, ok := result["TxnDetails"].([]interface{}); ok {
+		for _, txn := range txnDetails {
+			txnMap, valid := txn.(map[string]interface{})
+			if !valid {
+				continue
+			}
+
+			// **Apply Role Filter (Only if Provided)**
+			if role != "" {
+				if txnRole, exists := txnMap["Role"].(string); exists && txnRole != role {
+					continue
+				}
+			}
+
+			// **Apply Date Filter (Only if Provided)**
+			if txnDateStr, exists := txnMap["DateTime"].(string); exists {
+				txnDate, err := time.Parse(time.RFC3339, txnDateStr)
+				if err != nil {
+					continue
+				}
+
+				if (startDateSet && txnDate.Before(startDate)) || (endDateSet && txnDate.After(endDate)) {
+					continue
+				}
+			}
+
+			// **Add to Final List**
+			filteredTxns = append(filteredTxns, txnMap)
+		}
+	}
+
+	// **Prepare & Send Response**
+	basicResponse.Status = true
+	basicResponse.Message = "Filtered Txn Details"
+	basicResponse.Result = filteredTxns
 	c.JSON(http.StatusOK, basicResponse)
-	// Add a newline to the response body if required
-	c.Writer.Write([]byte("\n"))
 }
 
 // Generate secp256k1 key pair from mnemonic
