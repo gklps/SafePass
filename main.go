@@ -307,14 +307,14 @@ func main() {
 
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
-	r.Run(":8080")
+	r.Run(":9090")
 }
 
-var portCounter = 20000
+var portCounter = 20010
 
 func getNextPort() int {
 	defer func() { portCounter++ }()
-	return 20000
+	return 20010
 }
 
 // check if node is running
