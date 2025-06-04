@@ -1979,7 +1979,7 @@ func didRequest(pubKeyStr string, rubixNodePort string) (string, error) {
 		return "", err
 	}
 
-	url := fmt.Sprintf("http://localhost:20000/api/request-did-for-pubkey")
+	url := fmt.Sprintf("http://localhost:20010/api/request-did-for-pubkey")
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(bodyJSON))
 	if err != nil {
 		fmt.Println("Error creating HTTP request:", err)
