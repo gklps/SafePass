@@ -140,6 +140,35 @@ type TransferFTReq struct {
 	CreatorDID string `json:"creatorDID"`
 }
 
+// fetch FT transaction history request
+type FTTransactionHistoryRequest struct {
+	DID  string `json:"DID"`
+	Role string `json:"Role"`
+}
+
+type FTTransactionHistoryResponse struct {
+	Status       bool        `json:"status"`
+	Message      string      `json:"message"`
+	Result       interface{} `json:"result"`
+	FTTxnHistory []FTTxnInfo `json:"ft_txn_history"`
+}
+
+type FTTxnInfo struct {
+	TransactionID   string    `json:"TransactionID"`
+	TransactionType string    `json:"TransactionType"`
+	BlockID         string    `json:"BlockID"`
+	Mode            int       `json:"Mode"`
+	SenderDID       string    `json:"SenderDID"`
+	ReceiverDID     string    `json:"ReceiverDID"`
+	Amount          int       `json:"Amount"`
+	TotalTime       float64   `json:"TotalTime"`
+	Comment         string    `json:"Comment"`
+	DateTime        time.Time `json:"DateTime"`
+	Status          bool      `json:"Status"`
+	DeployerDID     string    `json:"DeployerDID"`
+	Epoch           int64     `json:"Epoch"`
+}
+
 // peer details struct
 type DIDPeerMap struct {
 	SelfDID string `json:"self_did"`
@@ -256,6 +285,7 @@ func main() {
 	r.POST("/transfer_ft", transferFTHandler)
 	r.GET("/get_all_ft", getAllFTHandler)
 	r.GET("/get_ft_chain", getFTChainHandler)
+	r.GET("/get_ft_txn_history", getFTtxnHistoryHandler)
 	//NFT features
 	r.POST("create_nft", createNFTHandler)
 	r.POST("subscribe_nft", subscribeNFTHandler)
@@ -274,7 +304,7 @@ func main() {
 	r.Run(":8080")
 }
 
-var portCounter = 20000
+var portCounter = 20008
 
 func getNextPort() int {
 	// Query the latest port used in the database
@@ -287,13 +317,13 @@ func getNextPort() int {
 
 	// If no records are found, start from port 20000
 	if latestPort == 0 {
-		latestPort = 20000
+		latestPort = 20008
 	}
 
 	// Increment the port, and loop back to 20000 if the port exceeds 20009
 	latestPort++
-	if latestPort > 20006 {
-		latestPort = 20000
+	if latestPort > 20010 {
+		latestPort = 20008
 	}
 
 	return latestPort
@@ -1030,7 +1060,7 @@ func addPeerRequest(data DIDPeerMap, rubixNodePort string) (string, error) {
 // @Accept json
 // @Produce json
 // @Param request body SignRequest true "Transaction signing request"
-// @Success 200 {object} SignResponse
+// @Success 200 {object} map[string]interface{}
 // @Failure 400 {object} ErrorResponse
 // @Failure 401 {object} ErrorResponse
 // @Security BearerAuth
@@ -2469,6 +2499,123 @@ func getFTChainRequest(tokenID string, rubixNodePort string) (map[string]interfa
 		fmt.Println("Error unmarshaling response:", err)
 	}
 	return response, nil
+}
+
+// @Summary Get fungible token transaction history
+// @Description Retrieves the transaction history of a specific fungible token
+// @Tags FT
+// @Accept json
+// @Produce json
+// @Param DID query string true "DID"
+// @Success 200 {object} map[string]interface{}
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Security BearerAuth
+// @Param Authorization header string true "Authorization token (Bearer <your_token>)"
+// @Router /get_ft_txn_history [get]
+func getFTtxnHistoryHandler(c *gin.Context) {
+	tokenString := c.GetHeader("Authorization")
+	if tokenString == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Token is required"})
+		c.Abort()
+		return
+	}
+
+	tokenString = tokenString[len("Bearer "):]
+
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("Unexpected signing method")
+		}
+		return jwtSecret, nil
+	})
+
+	if err != nil || !token.Valid {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
+		c.Abort()
+		return
+	}
+
+	// Extract the DID claim from the token
+	claims := token.Claims.(jwt.MapClaims)
+	did, ok := claims["sub"].(string)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token: missing or invalid DID"})
+		return
+	}
+
+	// Optionally, verify the DID exists in the database
+	user, err := storage.GetUserByDID(did)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found"})
+		c.Writer.Write([]byte("\n"))
+		return
+	}
+
+	userDID := c.Query("did")
+
+	if userDID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing required parameter: did"})
+		return
+	}
+	// Ensure the DID from the token matches the one in the request body
+	if userDID != did {
+		c.JSON(http.StatusForbidden, gin.H{"error": "DID mismatch"})
+		c.Writer.Write([]byte("\n"))
+		return
+	}
+
+	role := c.Query("Role")
+
+	ftTxnHistoryRequest := &FTTransactionHistoryRequest{
+		DID:  userDID,
+		Role: role,
+	}
+
+	resp, err := getFTTxnHistoryRequest(*ftTxnHistoryRequest, strconv.Itoa(user.Port))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": err.Error(),
+		})
+		// Add a newline to the response body if required
+		c.Writer.Write([]byte("\n"))
+	}
+
+	c.JSON(http.StatusOK, &resp)
+	// Add a newline to the response body if required
+	c.Writer.Write([]byte("\n"))
+}
+
+func getFTTxnHistoryRequest(ftTxnHistoryRequest FTTransactionHistoryRequest, rubixNodePort string) (*map[string]interface{}, error) {
+	url := fmt.Sprintf("http://localhost:%s/api/get-ft-txn-by-did?DID=%s&Role=%s", rubixNodePort, ftTxnHistoryRequest.DID, ftTxnHistoryRequest.Role)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		fmt.Println("Error creating HTTP request:", err)
+		return nil, err
+	}
+
+	req.Header.Set("Content-Type", "application/json; charset=UTF-8")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		fmt.Println("Error sending HTTP request:", err)
+		return nil, err
+	}
+	defer resp.Body.Close()
+	data2, err := io.ReadAll(resp.Body)
+	if err != nil {
+		fmt.Printf("Error reading response body: %s\n", err)
+		return nil, err
+	}
+
+	// Parse the response into a map
+	var ftTxnHistoryResponse map[string]interface{}
+	err = json.Unmarshal(data2, &ftTxnHistoryResponse)
+	if err != nil {
+		fmt.Println("Error unmarshaling response:", err)
+	}
+	return &ftTxnHistoryResponse, nil
 }
 
 // NFT Handlers

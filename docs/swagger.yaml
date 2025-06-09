@@ -725,6 +725,43 @@ paths:
       summary: Get fungible token chain
       tags:
       - FT
+  /get_ft_txn_history:
+    get:
+      consumes:
+      - application/json
+      description: Retrieves the transaction history of a specific fungible token
+      parameters:
+      - description: DID
+        in: query
+        name: DID
+        required: true
+        type: string
+      - description: Authorization token (Bearer <your_token>)
+        in: header
+        name: Authorization
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/main.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/main.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get fungible token transaction history
+      tags:
+      - FT
   /get_nft:
     get:
       consumes:
@@ -1066,7 +1103,8 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/main.SignRequest'
+            additionalProperties: true
+            type: object
         "400":
           description: Bad Request
           schema:
