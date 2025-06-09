@@ -449,7 +449,7 @@ func createUserHandler(c *gin.Context) {
 		return
 	}
 
-	resp, err := http.Post("http://localhost:8080/create_wallet", "application/json", bytes.NewBuffer(walletRequest))
+	resp, err := http.Post("http://localhost:9090/create_wallet", "application/json", bytes.NewBuffer(walletRequest))
 	if err != nil {
 		log.Printf("HTTP request error: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not connect to wallet service"})
