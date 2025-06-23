@@ -2245,6 +2245,7 @@ func RequestTxnsByDID(did string, role string, startDate string, endDate string,
 
 // registerDIDRequestsends request to rubix node to publish the did info in the network
 func registerDIDRequest(did string, rubixNodePort string) (map[string]interface{}, error) {
+	fmt.Printf("Inside registerDID function with DID: %s and Rubix Node Port: %s\n", did, rubixNodePort)
 	data := map[string]interface{}{
 		"did": did,
 	}
