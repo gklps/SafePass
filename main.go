@@ -175,19 +175,26 @@ type FTTransactionHistoryResponse struct {
 }
 
 type FTTxnInfo struct {
-	TransactionID   string    `json:"TransactionID"`
-	TransactionType string    `json:"TransactionType"`
-	BlockID         string    `json:"BlockID"`
-	Mode            int       `json:"Mode"`
-	SenderDID       string    `json:"SenderDID"`
-	ReceiverDID     string    `json:"ReceiverDID"`
-	Amount          int       `json:"Amount"`
-	TotalTime       float64   `json:"TotalTime"`
-	Comment         string    `json:"Comment"`
-	DateTime        time.Time `json:"DateTime"`
-	Status          bool      `json:"Status"`
-	DeployerDID     string    `json:"DeployerDID"`
-	Epoch           int64     `json:"Epoch"`
+	TransactionID   string           `json:"TransactionID"`
+	TransactionType string           `json:"TransactionType"`
+	BlockID         string           `json:"BlockID"`
+	Mode            int              `json:"Mode"`
+	SenderDID       string           `json:"SenderDID"`
+	ReceiverDID     string           `json:"ReceiverDID"`
+	Amount          int              `json:"Amount"`
+	TotalTime       float64          `json:"TotalTime"`
+	Comment         string           `json:"Comment"`
+	DateTime        time.Time        `json:"DateTime"`
+	Status          bool             `json:"Status"`
+	DeployerDID     string           `json:"DeployerDID"`
+	Epoch           int64            `json:"Epoch"`
+	Tokens          []FTTokenSummary `json:"-"`
+}
+
+type FTTokenSummary struct {
+	CreatorDID string
+	FTName     string
+	Count      int
 }
 
 // peer details struct
