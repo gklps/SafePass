@@ -301,10 +301,10 @@ func main() {
 
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
-	r.Run(":8080")
+	r.Run(":9090")
 }
 
-var portCounter = 20008
+var portCounter = 20010
 
 func getNextPort() int {
 	// Query the latest port used in the database
@@ -312,21 +312,21 @@ func getNextPort() int {
 	err := db.QueryRow("SELECT port FROM users ORDER BY id DESC LIMIT 1").Scan(&latestPort)
 	if err != nil && err != sql.ErrNoRows {
 		log.Printf("Database error while retrieving latest port: %v", err)
-		return 20000 // Fallback to port 20000 if there's an error
+		return 20010 // Fallback to port 20000 if there's an error
 	}
 
 	// If no records are found, start from port 20000
 	if latestPort == 0 {
-		latestPort = 20008
+		latestPort = 20010
 	}
 
 	// Increment the port, and loop back to 20000 if the port exceeds 20009
 	latestPort++
 	if latestPort > 20010 {
-		latestPort = 20008
+		latestPort = 20010
 	}
 
-	return latestPort
+	return 20010
 }
 
 // check if node is running
@@ -438,7 +438,7 @@ func createUserHandler(c *gin.Context) {
 	// Create the wallet and fetch the DID
 	walletRequest := `{"port":` + strconv.Itoa(port) + `}`
 	log.Printf("Sending request to /create_wallet: %s", walletRequest)
-	resp, err := http.Post("http://localhost:8080/create_wallet", "application/json", bytes.NewBuffer([]byte(walletRequest)))
+	resp, err := http.Post("http://localhost:9090/create_wallet", "application/json", bytes.NewBuffer([]byte(walletRequest)))
 	if err != nil {
 		log.Printf("HTTP request error: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not connect to wallet service"})
@@ -1150,7 +1150,7 @@ func callSignHandler(response map[string]interface{}, did string) (string, error
 	}
 
 	// log.Printf("Sending request to /create_wallet: %s", walletRequest)
-	resp, err := http.Post("http://localhost:8080/sign", "application/json", bytes.NewBuffer(bodyJSON))
+	resp, err := http.Post("http://localhost:9090/sign", "application/json", bytes.NewBuffer(bodyJSON))
 	if err != nil {
 		log.Printf("HTTP request error: %v", err)
 		return "", err
