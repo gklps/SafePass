@@ -241,7 +241,7 @@ type BasicResponse struct {
 // @description API documentation for the Wallet application.
 // @contact.name API Support
 // @contact.email support@example.com
-// @host localhost:8080
+// @host localhost:9090
 // @BasePath /
 // @securityDefinitions.apikey BearerAuth
 // @in header
@@ -1402,7 +1402,7 @@ func callSignHandler(response map[string]interface{}, did string) (map[string]in
 		return nil, err
 	}
 
-	resp, err := http.Post("http://localhost:8080/sign", "application/json", bytes.NewBuffer(bodyJSON))
+	resp, err := http.Post("http://localhost:9090/sign", "application/json", bytes.NewBuffer(bodyJSON))
 	if err != nil {
 		log.Printf("HTTP request error: %v", err)
 		return nil, err
