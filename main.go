@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -1403,13 +1404,22 @@ func PassSignatureHandler(c *gin.Context) {
 	// prepare response
 	basicResponse.Status = resp["status"].(bool)
 	basicResponse.Message = resp["message"].(string) // if the mesaage says "Signature needed" the user should
-	basicResponse.Result = resp["result"]            // provide the signature again on the hash provided under result
+	basicResponse.Result = resp["result"]
 
+	if strings.Contains(basicResponse.Message, "with transaction id") {
+		if txID := extractTransactionIDFromMessage(basicResponse.Message); txID != "" {
+			basicResponse.Result = txID
+		}
+	}
 	fmt.Println("basic response:", basicResponse)
 	c.JSON(http.StatusOK, basicResponse)
 	// Add a newline to the response body if required
 	c.Writer.Write([]byte("\n"))
 
+}
+func extractTransactionIDFromMessage(msg string) string {
+	re := regexp.MustCompile(`\b[a-fA-F0-9]{64}\b`)
+	return re.FindString(msg)
 }
 
 // callSignHandler
