@@ -271,7 +271,7 @@ type BasicResponse struct {
 // @description API documentation for the Wallet application.
 // @contact.name API Support
 // @contact.email support@example.com
-// @host localhost:9090
+// @host localhost:8080
 // @BasePath /
 // @securityDefinitions.apikey BearerAuth
 // @in header
@@ -338,14 +338,14 @@ func main() {
 
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
-	r.Run(":9090")
+	r.Run(":8080")
 }
 
-var portCounter = 20010
+var portCounter = 20000
 
 func getNextPort() int {
 	defer func() { portCounter++ }()
-	return 20010
+	return 20000
 }
 
 // check if node is running
@@ -480,7 +480,7 @@ func createUserHandler(c *gin.Context) {
 		return
 	}
 
-	resp, err := http.Post("http://localhost:9090/create_wallet", "application/json", bytes.NewBuffer(walletRequest))
+	resp, err := http.Post("http://localhost:8080/create_wallet", "application/json", bytes.NewBuffer(walletRequest))
 	if err != nil {
 		log.Printf("HTTP request error: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not connect to wallet service"})
@@ -1437,7 +1437,7 @@ func callSignHandler(response map[string]interface{}, did string) (map[string]in
 		return nil, err
 	}
 
-	resp, err := http.Post("http://localhost:9090/sign", "application/json", bytes.NewBuffer(bodyJSON))
+	resp, err := http.Post("http://localhost:8080/sign", "application/json", bytes.NewBuffer(bodyJSON))
 	if err != nil {
 		log.Printf("HTTP request error: %v", err)
 		return nil, err
