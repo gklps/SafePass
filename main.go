@@ -1398,10 +1398,14 @@ func PassSignatureHandler(c *gin.Context) {
 		return
 	}
 
+	fmt.Println("response from sign response:", resp)
+
 	// prepare response
 	basicResponse.Status = resp["status"].(bool)
 	basicResponse.Message = resp["message"].(string) // if the mesaage says "Signature needed" the user should
 	basicResponse.Result = resp["result"]            // provide the signature again on the hash provided under result
+
+	fmt.Println("basic response:", basicResponse)
 	c.JSON(http.StatusOK, basicResponse)
 	// Add a newline to the response body if required
 	c.Writer.Write([]byte("\n"))
