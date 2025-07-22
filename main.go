@@ -1725,7 +1725,7 @@ func requestBalanceHandler(c *gin.Context) {
 	}
 
 	basicResponse.Status = statusOK
-	basicResponse.Message = strings.Join(messages, "; ")
+	basicResponse.Message = "Got account info successfully"
 	basicResponse.Result = merged
 	c.JSON(http.StatusOK, basicResponse)
 	c.Writer.Write([]byte("\n"))
@@ -1985,7 +1985,7 @@ func getTxnByDIDHandler(c *gin.Context) {
 	}
 
 	basicResponse.Status = statusOK
-	basicResponse.Message = strings.Join(messages, "; ")
+	basicResponse.Message = "Filtered Txn Details"
 	basicResponse.Result = merged
 	c.JSON(http.StatusOK, basicResponse)
 	c.Writer.Write([]byte("\n"))
@@ -2912,7 +2912,7 @@ func getAllFTHandler(c *gin.Context) {
 	}
 
 	basicResponse.Status = statusOK
-	basicResponse.Message = strings.Join(messages, "; ")
+	basicResponse.Message = "Got FT info successfully"
 	basicResponse.Result = merged
 	c.JSON(http.StatusOK, basicResponse)
 	c.Writer.Write([]byte("\n"))
