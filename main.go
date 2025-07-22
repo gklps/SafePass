@@ -1703,7 +1703,7 @@ func requestBalanceHandler(c *gin.Context) {
 	basicResponse.Result = nil
 	basicResponseMap := map[string]interface{}{
 		"status":       true,
-		"message":      "Got merged account info",
+		"message":      "Got account info successfully",
 		"result":       nil,
 		"account_info": []interface{}{merged},
 	}
@@ -1888,14 +1888,14 @@ func getTxnByDIDHandler(c *gin.Context) {
 		return
 	}
 
-	// Optionally, verify the DID exists in the database
-	user, err := storage.GetUserByDID(did)
-	if err != nil {
-		basicResponse.Message = "User not found, " + err.Error()
-		c.JSON(http.StatusUnauthorized, basicResponse)
-		c.Writer.Write([]byte("\n"))
-		return
-	}
+	/* 	// Optionally, verify the DID exists in the database
+	   	user, err := storage.GetUserByDID(did)
+	   	if err != nil {
+	   		basicResponse.Message = "User not found, " + err.Error()
+	   		c.JSON(http.StatusUnauthorized, basicResponse)
+	   		c.Writer.Write([]byte("\n"))
+	   		return
+	   	} */
 
 	// Get Query Params
 	userDID := c.Query("did")
@@ -1925,76 +1925,35 @@ func getTxnByDIDHandler(c *gin.Context) {
 	}
 
 	// **Validate Optional Dates**
-	var startDate, endDate time.Time
-	startDateSet, endDateSet := false, false
-
 	if startDateStr != "" {
-		startDate, err = time.Parse("2006-01-02", startDateStr)
-		if err != nil {
+		if _, err := time.Parse("2006-01-02", startDateStr); err != nil {
 			basicResponse.Message = "Invalid StartDate format, expected YYYY-MM-DD"
 			c.JSON(http.StatusBadRequest, basicResponse)
 			return
 		}
-		startDateSet = true
 	}
-
 	if endDateStr != "" {
-		endDate, err = time.Parse("2006-01-02", endDateStr)
-		if err != nil {
+		if _, err := time.Parse("2006-01-02", endDateStr); err != nil {
 			basicResponse.Message = "Invalid EndDate format, expected YYYY-MM-DD"
 			c.JSON(http.StatusBadRequest, basicResponse)
 			return
 		}
-		endDateSet = true
 	}
 
-	// **Call the Rubix Node**
-	result, err := RequestTxnsByDID(userDID, role, startDateStr, endDateStr, strconv.Itoa(user.Port))
-	if err != nil {
-		basicResponse.Message = err.Error()
-		c.JSON(http.StatusBadRequest, basicResponse)
-		return
+	// **Call both Rubix Nodes**
+	result1, _ := RequestTxnsByDID(userDID, role, startDateStr, endDateStr, "20000")
+	result2, _ := RequestTxnsByDID(userDID, role, startDateStr, endDateStr, "20010")
+	var txns1, txns2 []interface{}
+	if arr, ok := result1["TxnDetails"].([]interface{}); ok {
+		txns1 = arr
 	}
-
-	// **Apply Filtering (If Needed)**
-	var filteredTxns []map[string]interface{}
-
-	// Ensure "TxnDetails" Exists
-	if txnDetails, ok := result["TxnDetails"].([]interface{}); ok {
-		for _, txn := range txnDetails {
-			txnMap, valid := txn.(map[string]interface{})
-			if !valid {
-				continue
-			}
-
-			// **Apply Role Filter (Only if Provided)**
-			if role != "" {
-				if txnRole, exists := txnMap["Role"].(string); exists && txnRole != role {
-					continue
-				}
-			}
-
-			// **Apply Date Filter (Only if Provided)**
-			if txnDateStr, exists := txnMap["DateTime"].(string); exists {
-				txnDate, err := time.Parse(time.RFC3339, txnDateStr)
-				if err != nil {
-					continue
-				}
-
-				if (startDateSet && txnDate.Before(startDate)) || (endDateSet && txnDate.After(endDate)) {
-					continue
-				}
-			}
-
-			// **Add to Final List**
-			filteredTxns = append(filteredTxns, txnMap)
-		}
+	if arr, ok := result2["TxnDetails"].([]interface{}); ok {
+		txns2 = arr
 	}
-
-	// **Prepare & Send Response**
+	merged := mergeDedupSortTxns(txns1, txns2)
 	basicResponse.Status = true
 	basicResponse.Message = "Filtered Txn Details"
-	basicResponse.Result = filteredTxns
+	basicResponse.Result = merged
 	c.JSON(http.StatusOK, basicResponse)
 }
 
@@ -3157,7 +3116,7 @@ func getFTtxnHistoryHandler(c *gin.Context) {
 	merged := mergeDedupSortTxns(txns1, txns2)
 	c.JSON(http.StatusOK, gin.H{
 		"status":     true,
-		"message":    "Merged FT Txn Details",
+		"message":    "Retrieved FT Txn Details",
 		"TxnDetails": merged,
 	})
 	c.Writer.Write([]byte("\n"))
