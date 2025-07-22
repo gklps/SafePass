@@ -5015,7 +5015,7 @@ func mergeAccountInfo(a1, a2 interface{}) interface{} {
 	slice1, ok1 := a1.([]interface{})
 	slice2, ok2 := a2.([]interface{})
 	if ok1 && ok2 {
-		return mergeFTInfo(slice1, slice2)
+		return mergeSumFTInfo(slice1, slice2)
 	}
 	// fallback: just return a1 if a2 is nil, or vice versa
 	if a1 != nil {
@@ -5054,6 +5054,61 @@ func mergeTxnHistory(txns1, txns2 []interface{}) []interface{} {
 		res[i] = v
 	}
 	return res
+}
+
+// --- mergeSumFTInfo: merge FT info by ft_name+creator_did, summing ft_count ---
+func mergeSumFTInfo(ft1, ft2 []interface{}) []map[string]interface{} {
+	ftMap := make(map[string]map[string]interface{})
+	for _, arr := range [][]interface{}{ft1, ft2} {
+		for _, v := range arr {
+			m, ok := v.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			key := toString(m["ft_name"]) + "|" + toString(m["creator_did"])
+			if existing, found := ftMap[key]; found {
+				existing["ft_count"] = toInt64(existing["ft_count"]) + toInt64(m["ft_count"])
+			} else {
+				newMap := make(map[string]interface{})
+				for k, val := range m {
+					newMap[k] = val
+				}
+				ftMap[key] = newMap
+			}
+		}
+	}
+	out := make([]map[string]interface{}, 0, len(ftMap))
+	for _, v := range ftMap {
+		out = append(out, v)
+	}
+	return out
+}
+
+// --- mergeDedupSortTxns: deduplicate by TransactionID, sort by Epoch ---
+func mergeDedupSortTxns(txns1, txns2 []interface{}) []map[string]interface{} {
+	txnMap := make(map[string]map[string]interface{})
+	for _, arr := range [][]interface{}{txns1, txns2} {
+		for _, v := range arr {
+			m, ok := v.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			id := toString(m["TransactionID"])
+			if id != "" {
+				txnMap[id] = m
+			}
+		}
+	}
+	merged := make([]map[string]interface{}, 0, len(txnMap))
+	for _, txn := range txnMap {
+		merged = append(merged, txn)
+	}
+	sort.Slice(merged, func(i, j int) bool {
+		e1 := toInt64(merged[i]["Epoch"])
+		e2 := toInt64(merged[j]["Epoch"])
+		return e1 < e2
+	})
+	return merged
 }
 
 // @Router /get-token [get]
