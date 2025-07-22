@@ -1647,16 +1647,13 @@ func requestBalanceHandler(c *gin.Context) {
 		c.Abort()
 		return
 	}
-
 	tokenString = tokenString[len("Bearer "):]
-
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("Unexpected signing method")
 		}
 		return jwtSecret, nil
 	})
-
 	if err != nil || !token.Valid {
 		basicResponse.Message = "Invalid token, " + err.Error()
 		c.JSON(http.StatusUnauthorized, basicResponse)
@@ -1664,8 +1661,6 @@ func requestBalanceHandler(c *gin.Context) {
 		c.Abort()
 		return
 	}
-
-	// Extract the DID claim from the token
 	claims := token.Claims.(jwt.MapClaims)
 	did, ok := claims["sub"].(string)
 	if !ok {
@@ -1674,61 +1669,36 @@ func requestBalanceHandler(c *gin.Context) {
 		c.Writer.Write([]byte("\n"))
 		return
 	}
-
 	userDID := c.Query("did")
-
 	if userDID == "" {
 		basicResponse.Message = "Missing required parameter: did"
 		c.JSON(http.StatusBadRequest, basicResponse)
 		c.Writer.Write([]byte("\n"))
 		return
 	}
-
-	// Ensure the DID from the token matches the one in the request body
 	if userDID != did {
 		basicResponse.Message = "DID mismatch"
 		c.JSON(http.StatusForbidden, basicResponse)
 		c.Writer.Write([]byte("\n"))
 		return
 	}
-
-	// Query both ports and aggregate
-	ports := []string{"20000", "20010"}
-	var results []interface{}
-	var messages []string
-	var statusOK bool
-	for _, port := range ports {
-		result, err := RequestBalance(did, port)
-		if err != nil {
-			messages = append(messages, err.Error())
-			continue
-		}
-		if s, ok := result["status"].(bool); ok && s {
-			statusOK = true
-		}
-		if msg, ok := result["message"].(string); ok {
-			messages = append(messages, msg)
-		}
-		if acct, ok := result["account_info"]; ok {
-			results = append(results, acct)
-		}
+	resp1, _ := RequestBalance(did, "20000")
+	resp2, _ := RequestBalance(did, "20010")
+	var info1, info2 []interface{}
+	if arr, ok := resp1["account_info"].([]interface{}); ok {
+		info1 = arr
 	}
-
-	// Merge account info
-	var merged interface{}
-	if len(results) == 2 {
-		merged = mergeAccountInfo(results[0], results[1])
-	} else if len(results) == 1 {
-		merged = results[0]
-	} else {
-		merged = nil
+	if arr, ok := resp2["account_info"].([]interface{}); ok {
+		info2 = arr
 	}
-
-	basicResponse.Status = statusOK
-	basicResponse.Message = "Got account info successfully"
-	basicResponse.Result = merged
-	c.JSON(http.StatusOK, basicResponse)
-	c.Writer.Write([]byte("\n"))
+	merged := mergeAccountInfo(info1, info2)
+	basicResponseMap := map[string]interface{}{
+		"status":       true,
+		"message":      "Got account info successfully",
+		"result":       nil,
+		"account_info": []interface{}{merged},
+	}
+	c.JSON(http.StatusOK, basicResponseMap)
 }
 
 // @Summary Create test RBT tokens
@@ -1881,16 +1851,13 @@ func getTxnByDIDHandler(c *gin.Context) {
 		c.Abort()
 		return
 	}
-
 	tokenString = tokenString[len("Bearer "):]
-
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("Unexpected signing method")
 		}
 		return jwtSecret, nil
 	})
-
 	if err != nil || !token.Valid {
 		basicResponse.Message = "Invalid token, " + err.Error()
 		c.JSON(http.StatusUnauthorized, basicResponse)
@@ -1898,8 +1865,6 @@ func getTxnByDIDHandler(c *gin.Context) {
 		c.Abort()
 		return
 	}
-
-	// Extract the DID claim from the token
 	claims := token.Claims.(jwt.MapClaims)
 	did, ok := claims["sub"].(string)
 	if !ok {
@@ -1908,35 +1873,25 @@ func getTxnByDIDHandler(c *gin.Context) {
 		c.Writer.Write([]byte("\n"))
 		return
 	}
-
-	// Get Query Params
 	userDID := c.Query("did")
 	role := c.Query("role")
 	startDateStr := c.Query("StartDate")
 	endDateStr := c.Query("EndDate")
-
-	// **DID is Mandatory**
 	if userDID == "" {
 		basicResponse.Message = "Missing required parameter: did"
 		c.JSON(http.StatusBadRequest, basicResponse)
 		return
 	}
-
-	// **Ensure Requesting DID Matches JWT DID**
 	if userDID != did {
 		basicResponse.Message = "DID mismatch"
 		c.JSON(http.StatusForbidden, basicResponse)
 		return
 	}
-
-	// **Validate Optional Role**
 	if role != "" && role != "Sender" && role != "Receiver" {
 		basicResponse.Message = "Invalid role, must be either 'Sender' or 'Receiver'"
 		c.JSON(http.StatusBadRequest, basicResponse)
 		return
 	}
-
-	// **Validate Optional Dates**
 	if startDateStr != "" {
 		if _, err := time.Parse("2006-01-02", startDateStr); err != nil {
 			basicResponse.Message = "Invalid StartDate format, expected YYYY-MM-DD"
@@ -1951,43 +1906,21 @@ func getTxnByDIDHandler(c *gin.Context) {
 			return
 		}
 	}
-
-	// Query both ports and aggregate
-	ports := []string{"20000", "20010"}
-	var txnResults [][]interface{}
-	var messages []string
-	var statusOK bool
-	for _, port := range ports {
-		resp, err := RequestTxnsByDID(userDID, role, startDateStr, endDateStr, port)
-		if err != nil {
-			messages = append(messages, err.Error())
-			continue
-		}
-		if s, ok := resp["status"].(bool); ok && s {
-			statusOK = true
-		}
-		if msg, ok := resp["message"].(string); ok {
-			messages = append(messages, msg)
-		}
-		if txns, ok := resp["result"].([]interface{}); ok {
-			txnResults = append(txnResults, txns)
-		}
+	result1, _ := RequestTxnsByDID(userDID, role, startDateStr, endDateStr, "20000")
+	result2, _ := RequestTxnsByDID(userDID, role, startDateStr, endDateStr, "20010")
+	var txns1, txns2 []interface{}
+	if arr, ok := result1["TxnDetails"].([]interface{}); ok {
+		txns1 = arr
 	}
-
-	// Merge, deduplicate, and sort transaction history
-	var merged []interface{}
-	if len(txnResults) == 2 {
-		merged = mergeTxnHistory(txnResults[0], txnResults[1])
-	} else if len(txnResults) == 1 {
-		merged = txnResults[0]
-	} else {
-		merged = []interface{}{}
+	if arr, ok := result2["TxnDetails"].([]interface{}); ok {
+		txns2 = arr
 	}
-
-	basicResponse.Status = statusOK
-	basicResponse.Message = "Filtered Txn Details"
-	basicResponse.Result = merged
-	c.JSON(http.StatusOK, basicResponse)
+	merged := mergeDedupSortTxns(txns1, txns2)
+	c.JSON(http.StatusOK, gin.H{
+		"status":     true,
+		"message":    "Retrieved Txn Details",
+		"TxnDetails": merged,
+	})
 	c.Writer.Write([]byte("\n"))
 }
 
@@ -2833,16 +2766,13 @@ func getAllFTHandler(c *gin.Context) {
 		c.Abort()
 		return
 	}
-
 	tokenString = tokenString[len("Bearer "):]
-
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("Unexpected signing method")
 		}
 		return jwtSecret, nil
 	})
-
 	if err != nil || !token.Valid {
 		basicResponse.Message = "Invalid token, " + err.Error()
 		c.JSON(http.StatusUnauthorized, basicResponse)
@@ -2850,8 +2780,6 @@ func getAllFTHandler(c *gin.Context) {
 		c.Abort()
 		return
 	}
-
-	// Extract the DID claim from the token
 	claims := token.Claims.(jwt.MapClaims)
 	did, ok := claims["sub"].(string)
 	if !ok {
@@ -2860,58 +2788,30 @@ func getAllFTHandler(c *gin.Context) {
 		c.Writer.Write([]byte("\n"))
 		return
 	}
-
 	userDID := c.Query("did")
-
 	if userDID == "" {
 		basicResponse.Message = "Missing required parameter: did"
 		c.JSON(http.StatusBadRequest, basicResponse)
 		c.Writer.Write([]byte("\n"))
 		return
 	}
-
-	// Ensure the DID from the token matches the one in the request body
 	if userDID != did {
 		basicResponse.Message = "DID mismatch"
 		c.JSON(http.StatusForbidden, basicResponse)
 		c.Writer.Write([]byte("\n"))
 		return
 	}
-
-	// Query both ports and aggregate
-	ports := []string{"20000", "20010"}
-	var results []interface{}
-	var messages []string
-	var statusOK bool
-	for _, port := range ports {
-		resp, err := getAllFTRequest(did, port)
-		if err != nil {
-			messages = append(messages, err.Error())
-			continue
-		}
-		if s, ok := resp["status"].(bool); ok && s {
-			statusOK = true
-		}
-		if msg, ok := resp["message"].(string); ok {
-			messages = append(messages, msg)
-		}
-		if ftinfo, ok := resp["ft_info"]; ok {
-			results = append(results, ftinfo)
-		}
+	resp1, _ := getAllFTRequest(did, "20000")
+	resp2, _ := getAllFTRequest(did, "20010")
+	var ft1, ft2 []interface{}
+	if arr, ok := resp1["ft_info"].([]interface{}); ok {
+		ft1 = arr
 	}
-
-	// Merge FT info
-	var merged interface{}
-	if len(results) == 2 {
-		// Both are expected to be []interface{} or similar
-		merged = mergeAccountInfo(results[0], results[1])
-	} else if len(results) == 1 {
-		merged = results[0]
-	} else {
-		merged = nil
+	if arr, ok := resp2["ft_info"].([]interface{}); ok {
+		ft2 = arr
 	}
-
-	basicResponse.Status = statusOK
+	merged := mergeSumFTInfo(ft1, ft2)
+	basicResponse.Status = true
 	basicResponse.Message = "Got FT info successfully"
 	basicResponse.Result = merged
 	c.JSON(http.StatusOK, basicResponse)
@@ -3108,86 +3008,53 @@ func getFTtxnHistoryHandler(c *gin.Context) {
 		c.Abort()
 		return
 	}
-
 	tokenString = tokenString[len("Bearer "):]
-
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("Unexpected signing method")
 		}
 		return jwtSecret, nil
 	})
-
 	if err != nil || !token.Valid {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
 		c.Abort()
 		return
 	}
-
-	// Extract the DID claim from the token
 	claims := token.Claims.(jwt.MapClaims)
 	did, ok := claims["sub"].(string)
 	if !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token: missing or invalid DID"})
 		return
 	}
-
 	userDID := c.Query("did")
-
 	if userDID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing required parameter: did"})
 		return
 	}
-	// Ensure the DID from the token matches the one in the request body
 	if userDID != did {
 		c.JSON(http.StatusForbidden, gin.H{"error": "DID mismatch"})
 		c.Writer.Write([]byte("\n"))
 		return
 	}
-
 	role := c.Query("Role")
-
 	ftTxnHistoryRequest := &FTTransactionHistoryRequest{
 		DID:  userDID,
 		Role: role,
 	}
-
-	// Query both ports and aggregate
-	ports := []string{"20000", "20010"}
-	var txnResults [][]interface{}
-	var messages []string
-	var statusOK bool
-	for _, port := range ports {
-		resp, err := getFTTxnHistoryRequest(*ftTxnHistoryRequest, port)
-		if err != nil {
-			messages = append(messages, err.Error())
-			continue
-		}
-		if s, ok := (*resp)["status"].(bool); ok && s {
-			statusOK = true
-		}
-		if msg, ok := (*resp)["message"].(string); ok {
-			messages = append(messages, msg)
-		}
-		if txns, ok := (*resp)["ft_txn_history"].([]interface{}); ok {
-			txnResults = append(txnResults, txns)
-		}
+	resp1, _ := getFTTxnHistoryRequest(*ftTxnHistoryRequest, "20000")
+	resp2, _ := getFTTxnHistoryRequest(*ftTxnHistoryRequest, "20010")
+	var txns1, txns2 []interface{}
+	if arr, ok := (*resp1)["TxnDetails"].([]interface{}); ok {
+		txns1 = arr
 	}
-
-	// Merge, deduplicate, and sort transaction history
-	var merged []interface{}
-	if len(txnResults) == 2 {
-		merged = mergeTxnHistory(txnResults[0], txnResults[1])
-	} else if len(txnResults) == 1 {
-		merged = txnResults[0]
-	} else {
-		merged = []interface{}{}
+	if arr, ok := (*resp2)["TxnDetails"].([]interface{}); ok {
+		txns2 = arr
 	}
-
+	merged := mergeDedupSortTxns(txns1, txns2)
 	c.JSON(http.StatusOK, gin.H{
-		"status":         statusOK,
-		"message":        strings.Join(messages, "; "),
-		"ft_txn_history": merged,
+		"status":     true,
+		"message":    "Retrieved FT Txn Details",
+		"TxnDetails": merged,
 	})
 	c.Writer.Write([]byte("\n"))
 }
@@ -5140,38 +5007,6 @@ func toString(val interface{}) string {
 	default:
 		return ""
 	}
-}
-
-// mergeFTInfo merges two FT info slices by summing balances for each unique FT/account
-func mergeFTInfo(ft1, ft2 []interface{}) []interface{} {
-	ftMap := make(map[string]map[string]interface{})
-	for _, entry := range append(ft1, ft2...) {
-		m, ok := entry.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		ftName := toString(m["ft_name"])
-		acct := toString(m["account"])
-		key := ftName + ":" + acct
-		if _, exists := ftMap[key]; !exists {
-			ftMap[key] = make(map[string]interface{})
-			for k, v := range m {
-				ftMap[key][k] = v
-			}
-		} else {
-			// Sum numeric fields
-			for k, v := range m {
-				if k == "balance" || k == "amount" {
-					ftMap[key][k] = toFloat64(ftMap[key][k]) + toFloat64(v)
-				}
-			}
-		}
-	}
-	result := make([]interface{}, 0, len(ftMap))
-	for _, v := range ftMap {
-		result = append(result, v)
-	}
-	return result
 }
 
 // mergeAccountInfo merges two account info maps by summing balances for each unique account
