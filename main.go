@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -344,6 +345,9 @@ func main() {
 	r.POST("/subscribe-smart-contract", subscribeSmartContractHandler)
 
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+
+	// Add the new endpoint
+	r.GET("/test/get-token", getTokenHandler)
 
 	r.Run(":9090")
 }
@@ -1649,16 +1653,13 @@ func requestBalanceHandler(c *gin.Context) {
 		c.Abort()
 		return
 	}
-
 	tokenString = tokenString[len("Bearer "):]
-
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("Unexpected signing method")
 		}
 		return jwtSecret, nil
 	})
-
 	if err != nil || !token.Valid {
 		basicResponse.Message = "Invalid token, " + err.Error()
 		c.JSON(http.StatusUnauthorized, basicResponse)
@@ -1666,8 +1667,6 @@ func requestBalanceHandler(c *gin.Context) {
 		c.Abort()
 		return
 	}
-
-	// Extract the DID claim from the token
 	claims := token.Claims.(jwt.MapClaims)
 	did, ok := claims["sub"].(string)
 	if !ok {
@@ -1676,49 +1675,39 @@ func requestBalanceHandler(c *gin.Context) {
 		c.Writer.Write([]byte("\n"))
 		return
 	}
-
-	// Optionally, verify the DID exists in the database
-	user, err := storage.GetUserByDID(did)
-	if err != nil {
-		basicResponse.Message = "User not found"
-		c.JSON(http.StatusInternalServerError, basicResponse)
-		c.Writer.Write([]byte("\n"))
-		return
-	}
-
 	userDID := c.Query("did")
-
 	if userDID == "" {
 		basicResponse.Message = "Missing required parameter: did"
 		c.JSON(http.StatusBadRequest, basicResponse)
 		c.Writer.Write([]byte("\n"))
 		return
 	}
-
-	// Ensure the DID from the token matches the one in the request body
 	if userDID != did {
 		basicResponse.Message = "DID mismatch"
 		c.JSON(http.StatusForbidden, basicResponse)
 		c.Writer.Write([]byte("\n"))
 		return
 	}
-
-	result, err := RequestBalance(did, strconv.Itoa(user.Port))
-	if err != nil {
-		basicResponse.Message = err.Error()
-		c.JSON(http.StatusBadRequest, basicResponse)
-		// Add a newline to the response body if required
-		c.Writer.Write([]byte("\n"))
-		return
+	resp1 := getAccountInfoFromNode(did, "20000")
+	resp2 := getAccountInfoFromNode(did, "20010")
+	var info1, info2 []interface{}
+	if arr, ok := resp1["account_info"].([]interface{}); ok {
+		info1 = arr
 	}
-
-	// prepare response
-	basicResponse.Status = result["status"].(bool)
-	basicResponse.Message = result["message"].(string)
-	basicResponse.Result = result["account_info"]
-	c.JSON(http.StatusOK, basicResponse)
-	// Add a newline to the response body if required
-	c.Writer.Write([]byte("\n"))
+	if arr, ok := resp2["account_info"].([]interface{}); ok {
+		info2 = arr
+	}
+	merged := mergeAccountInfo(info1, info2)
+	basicResponse.Status = true
+	basicResponse.Message = "Got merged account info"
+	basicResponse.Result = nil
+	basicResponseMap := map[string]interface{}{
+		"status":       true,
+		"message":      "Got merged account info",
+		"result":       nil,
+		"account_info": []interface{}{merged},
+	}
+	c.JSON(http.StatusOK, basicResponseMap)
 }
 
 // @Summary Create test RBT tokens
@@ -2880,15 +2869,6 @@ func getAllFTHandler(c *gin.Context) {
 		return
 	}
 
-	// Optionally, verify the DID exists in the database
-	user, err := storage.GetUserByDID(did)
-	if err != nil {
-		basicResponse.Message = "User not found, " + err.Error()
-		c.JSON(http.StatusUnauthorized, basicResponse)
-		c.Writer.Write([]byte("\n"))
-		return
-	}
-
 	userDID := c.Query("did")
 
 	if userDID == "" {
@@ -2906,20 +2886,20 @@ func getAllFTHandler(c *gin.Context) {
 		return
 	}
 
-	resp, err := getAllFTRequest(did, strconv.Itoa(user.Port))
-	if err != nil {
-		basicResponse.Message = err.Error()
-		c.JSON(http.StatusBadRequest, basicResponse)
-		// Add a newline to the response body if required
-		c.Writer.Write([]byte("\n"))
+	resp1, _ := getAllFTRequest(did, "20000")
+	resp2, _ := getAllFTRequest(did, "20010")
+	var ft1, ft2 []interface{}
+	if arr, ok := resp1["ft_info"].([]interface{}); ok {
+		ft1 = arr
 	}
-
-	// prepare response
-	basicResponse.Status = resp["status"].(bool)
-	basicResponse.Message = resp["message"].(string)
-	basicResponse.Result = resp["ft_info"]
+	if arr, ok := resp2["ft_info"].([]interface{}); ok {
+		ft2 = arr
+	}
+	merged := mergeSumFTInfo(ft1, ft2)
+	basicResponse.Status = true
+	basicResponse.Message = "Got FT info successfully"
+	basicResponse.Result = merged
 	c.JSON(http.StatusOK, basicResponse)
-	// Add a newline to the response body if required
 	c.Writer.Write([]byte("\n"))
 }
 
@@ -3138,12 +3118,12 @@ func getFTtxnHistoryHandler(c *gin.Context) {
 	}
 
 	// Optionally, verify the DID exists in the database
-	user, err := storage.GetUserByDID(did)
+	/* user, err := storage.GetUserByDID(did)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found"})
 		c.Writer.Write([]byte("\n"))
 		return
-	}
+	} */
 
 	userDID := c.Query("did")
 
@@ -3165,17 +3145,21 @@ func getFTtxnHistoryHandler(c *gin.Context) {
 		Role: role,
 	}
 
-	resp, err := getFTTxnHistoryRequest(*ftTxnHistoryRequest, strconv.Itoa(user.Port))
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": err.Error(),
-		})
-		// Add a newline to the response body if required
-		c.Writer.Write([]byte("\n"))
+	resp1, _ := getFTTxnHistoryRequest(*ftTxnHistoryRequest, "20000")
+	resp2, _ := getFTTxnHistoryRequest(*ftTxnHistoryRequest, "20010")
+	var txns1, txns2 []interface{}
+	if arr, ok := (*resp1)["TxnDetails"].([]interface{}); ok {
+		txns1 = arr
 	}
-
-	c.JSON(http.StatusOK, &resp)
-	// Add a newline to the response body if required
+	if arr, ok := (*resp2)["TxnDetails"].([]interface{}); ok {
+		txns2 = arr
+	}
+	merged := mergeDedupSortTxns(txns1, txns2)
+	c.JSON(http.StatusOK, gin.H{
+		"status":     true,
+		"message":    "Merged FT Txn Details",
+		"TxnDetails": merged,
+	})
 	c.Writer.Write([]byte("\n"))
 }
 
@@ -5054,4 +5038,221 @@ func subscribeSmartContractRequest(SmartContract string, rubixNodePort string) (
 	}
 
 	return respMsg, nil
+}
+
+// --- Helpers for merging, deduplication, and type conversion ---
+
+func toInt64(val interface{}) int64 {
+	switch v := val.(type) {
+	case int:
+		return int64(v)
+	case int64:
+		return v
+	case float64:
+		return int64(v)
+	case string:
+		i, err := strconv.ParseInt(v, 10, 64)
+		if err == nil {
+			return i
+		}
+		f, err := strconv.ParseFloat(v, 64)
+		if err == nil {
+			return int64(f)
+		}
+		return 0
+	case nil:
+		return 0
+	default:
+		return 0
+	}
+}
+
+func toString(val interface{}) string {
+	switch v := val.(type) {
+	case string:
+		return v
+	case int:
+		return strconv.Itoa(v)
+	case int64:
+		return strconv.FormatInt(v, 10)
+	case float64:
+		return strconv.FormatInt(int64(v), 10)
+	default:
+		return ""
+	}
+}
+
+func mergeSumFTInfo(ft1, ft2 []interface{}) []map[string]interface{} {
+	// Key: ft_name + creator_did
+	ftMap := make(map[string]map[string]interface{})
+	for _, arr := range [][]interface{}{ft1, ft2} {
+		for _, v := range arr {
+			m, ok := v.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			key := m["ft_name"].(string) + "|" + m["creator_did"].(string)
+			if existing, found := ftMap[key]; found {
+				// Sum ft_count
+				existing["ft_count"] = toInt64(existing["ft_count"]) + toInt64(m["ft_count"])
+			} else {
+				// Copy map
+				newMap := make(map[string]interface{})
+				for k, val := range m {
+					newMap[k] = val
+				}
+				ftMap[key] = newMap
+			}
+		}
+	}
+	// Convert map to slice
+	out := make([]map[string]interface{}, 0, len(ftMap))
+	for _, v := range ftMap {
+		out = append(out, v)
+	}
+	return out
+}
+
+func mergeDedupSortTxns(txns1, txns2 []interface{}) []map[string]interface{} {
+	txnMap := make(map[string]map[string]interface{})
+	for _, arr := range [][]interface{}{txns1, txns2} {
+		for _, v := range arr {
+			m, ok := v.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			id := toString(m["TransactionID"])
+			if id != "" {
+				txnMap[id] = m
+			}
+		}
+	}
+	merged := make([]map[string]interface{}, 0, len(txnMap))
+	for _, txn := range txnMap {
+		merged = append(merged, txn)
+	}
+	sort.Slice(merged, func(i, j int) bool {
+		e1 := toInt64(merged[i]["Epoch"])
+		e2 := toInt64(merged[j]["Epoch"])
+		return e1 < e2
+	})
+	return merged
+}
+
+// --- Helper for merging account_info ---
+func toFloat64(val interface{}) float64 {
+	switch v := val.(type) {
+	case float64:
+		return v
+	case int:
+		return float64(v)
+	case int64:
+		return float64(v)
+	case string:
+		f, err := strconv.ParseFloat(v, 64)
+		if err == nil {
+			return f
+		}
+		return 0
+	case nil:
+		return 0
+	default:
+		return 0
+	}
+}
+
+func mergeAccountInfo(info1, info2 []interface{}) map[string]interface{} {
+	if len(info1) == 0 && len(info2) == 0 {
+		return map[string]interface{}{}
+	}
+	var m1, m2 map[string]interface{}
+	if len(info1) > 0 {
+		m1, _ = info1[0].(map[string]interface{})
+	} else {
+		m1 = make(map[string]interface{})
+	}
+	if len(info2) > 0 {
+		m2, _ = info2[0].(map[string]interface{})
+	} else {
+		m2 = make(map[string]interface{})
+	}
+	merged := make(map[string]interface{})
+	// Copy DID and did_type from either (they should be the same)
+	if m1["did"] != nil {
+		merged["did"] = m1["did"]
+	} else {
+		merged["did"] = m2["did"]
+	}
+	if m1["did_type"] != nil {
+		merged["did_type"] = m1["did_type"]
+	} else {
+		merged["did_type"] = m2["did_type"]
+	}
+	// Sum numeric fields
+	merged["rbt_amount"] = toFloat64(m1["rbt_amount"]) + toFloat64(m2["rbt_amount"])
+	merged["pledged_rbt"] = toFloat64(m1["pledged_rbt"]) + toFloat64(m2["pledged_rbt"])
+	merged["locked_rbt"] = toFloat64(m1["locked_rbt"]) + toFloat64(m2["locked_rbt"])
+	merged["pinned_rbt"] = toFloat64(m1["pinned_rbt"]) + toFloat64(m2["pinned_rbt"])
+	return merged
+}
+
+// --- Helper for /api/get-account-info?did ---
+func getAccountInfoFromNode(did string, port string) map[string]interface{} {
+	url := fmt.Sprintf("http://localhost:%s/api/get-account-info?did=%s", port, did)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return map[string]interface{}{}
+	}
+	req.Header.Set("Content-Type", "application/json; charset=UTF-8")
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return map[string]interface{}{}
+	}
+	defer resp.Body.Close()
+	data2, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return map[string]interface{}{}
+	}
+	var response map[string]interface{}
+	_ = json.Unmarshal(data2, &response)
+	return response
+}
+
+// --- New endpoint: /get-token ---
+// Reads an input from a file, maps it to a DID, and returns a JWT token for that DID
+func getTokenHandler(c *gin.Context) {
+	// Path to the file containing the user identifier or key
+	filePath := "did_input.txt" // You can change this path as needed
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		c.JSON(500, gin.H{"error": "Failed to read input file: " + err.Error()})
+		return
+	}
+	input := string(data)
+	input = strings.TrimSpace(input)
+
+	// Map input to DID (for demo, assume file contains the DID directly)
+	// In a real scenario, you could map input to DID using a lookup or database
+	selectedDID := input
+	if selectedDID == "" {
+		c.JSON(400, gin.H{"error": "No DID found for input"})
+		return
+	}
+
+	// Generate JWT token for the DID
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"sub": selectedDID,
+		"exp": time.Now().Add(time.Hour * 24).Unix(), // 24 hour expiry
+	})
+	tokenString, err := token.SignedString(jwtSecret)
+	if err != nil {
+		c.JSON(500, gin.H{"error": "Failed to sign token: " + err.Error()})
+		return
+	}
+
+	c.JSON(200, gin.H{
+		"token": tokenString,
+		"did":   selectedDID,
+	})
 }
