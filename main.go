@@ -1940,9 +1940,9 @@ func getTxnByDIDHandler(c *gin.Context) {
 		}
 	}
 
-	// **Call both Rubix Nodes**
-	result1, _ := RequestTxnsByDID(userDID, role, startDateStr, endDateStr, "20000")
-	result2, _ := RequestTxnsByDID(userDID, role, startDateStr, endDateStr, "20010")
+	// **Call both Rubix Nodes to get all transactions (no date filtering)**
+	result1, _ := RequestTxnsByDID(userDID, "", "", "", "20000")
+	result2, _ := RequestTxnsByDID(userDID, "", "", "", "20010")
 	var txns1, txns2 []interface{}
 	if arr, ok := result1["TxnDetails"].([]interface{}); ok {
 		txns1 = arr
@@ -1951,9 +1951,13 @@ func getTxnByDIDHandler(c *gin.Context) {
 		txns2 = arr
 	}
 	merged := mergeDedupSortTxns(txns1, txns2)
+
+	// **Filter transactions by date and role on our side**
+	filtered := filterTransactionsByDateAndRole(merged, startDateStr, endDateStr, role, userDID)
+
 	basicResponse.Status = true
 	basicResponse.Message = "Filtered Txn Details"
-	basicResponse.Result = merged
+	basicResponse.Result = filtered
 	c.JSON(http.StatusOK, basicResponse)
 }
 
@@ -3046,9 +3050,14 @@ func getFTChainRequest(tokenID string, rubixNodePort string) (map[string]interfa
 // @Param Authorization header string true "Authorization token (Bearer <your_token>)"
 // @Router /get_ft_txn_history [get]
 func getFTtxnHistoryHandler(c *gin.Context) {
+	basicResponse := BasicResponse{
+		Status: false,
+	}
 	tokenString := c.GetHeader("Authorization")
 	if tokenString == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Token is required"})
+		basicResponse.Message = "Token is required"
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		c.Abort()
 		return
 	}
@@ -3063,7 +3072,9 @@ func getFTtxnHistoryHandler(c *gin.Context) {
 	})
 
 	if err != nil || !token.Valid {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
+		basicResponse.Message = "Invalid token, " + err.Error()
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		c.Abort()
 		return
 	}
@@ -3072,14 +3083,17 @@ func getFTtxnHistoryHandler(c *gin.Context) {
 	claims := token.Claims.(jwt.MapClaims)
 	did, ok := claims["sub"].(string)
 	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token: missing or invalid DID"})
+		basicResponse.Message = "Invalid token: missing or invalid DID"
+		c.JSON(http.StatusUnauthorized, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 
 	// Optionally, verify the DID exists in the database
 	/* user, err := storage.GetUserByDID(did)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found"})
+		basicResponse.Message = "User not found, " + err.Error()
+		c.JSON(http.StatusUnauthorized, basicResponse)
 		c.Writer.Write([]byte("\n"))
 		return
 	} */
@@ -3087,12 +3101,15 @@ func getFTtxnHistoryHandler(c *gin.Context) {
 	userDID := c.Query("did")
 
 	if userDID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing required parameter: did"})
+		basicResponse.Message = "Missing required parameter: did"
+		c.JSON(http.StatusBadRequest, basicResponse)
+		c.Writer.Write([]byte("\n"))
 		return
 	}
 	// Ensure the DID from the token matches the one in the request body
 	if userDID != did {
-		c.JSON(http.StatusForbidden, gin.H{"error": "DID mismatch"})
+		basicResponse.Message = "DID mismatch"
+		c.JSON(http.StatusForbidden, basicResponse)
 		c.Writer.Write([]byte("\n"))
 		return
 	}
@@ -3114,11 +3131,20 @@ func getFTtxnHistoryHandler(c *gin.Context) {
 		txns2 = arr
 	}
 	merged := mergeDedupSortTxns(txns1, txns2)
-	c.JSON(http.StatusOK, gin.H{
-		"status":     true,
-		"message":    "Retrieved FT Txn Details",
+
+	basicResponse.Status = true
+	basicResponse.Message = "Retrieved FT Txn Details"
+	basicResponse.Result = "Successful"
+
+	// Create the response with the expected structure
+	response := map[string]interface{}{
+		"status":     basicResponse.Status,
+		"message":    basicResponse.Message,
+		"result":     basicResponse.Result,
 		"TxnDetails": merged,
-	})
+	}
+
+	c.JSON(http.StatusOK, response)
 	c.Writer.Write([]byte("\n"))
 }
 
@@ -5096,6 +5122,79 @@ func mergeDedupSortTxns(txns1, txns2 []interface{}) []map[string]interface{} {
 		return e1 < e2
 	})
 	return merged
+}
+
+// filterTransactionsByDateAndRole filters transactions based on date range and role
+func filterTransactionsByDateAndRole(transactions []map[string]interface{}, startDateStr, endDateStr, role, userDID string) []map[string]interface{} {
+	var startDate, endDate time.Time
+	var err error
+
+	// Parse start date if provided
+	if startDateStr != "" {
+		startDate, err = time.Parse("2006-01-02", startDateStr)
+		if err != nil {
+			return transactions // Return all if parsing fails
+		}
+		// Set to start of day
+		startDate = startDate.Truncate(24 * time.Hour)
+	}
+
+	// Parse end date if provided
+	if endDateStr != "" {
+		endDate, err = time.Parse("2006-01-02", endDateStr)
+		if err != nil {
+			return transactions // Return all if parsing fails
+		}
+		// Set to end of day
+		endDate = endDate.Add(24*time.Hour - time.Nanosecond)
+	}
+
+	filtered := make([]map[string]interface{}, 0)
+
+	for _, txn := range transactions {
+		// Filter by role if specified
+		if role != "" {
+			senderDID := toString(txn["SenderDID"])
+			receiverDID := toString(txn["ReceiverDID"])
+
+			if role == "Sender" && senderDID != userDID {
+				continue
+			}
+			if role == "Receiver" && receiverDID != userDID {
+				continue
+			}
+		}
+
+		// Filter by date range if specified
+		if startDateStr != "" || endDateStr != "" {
+			dateTimeStr := toString(txn["DateTime"])
+			if dateTimeStr == "" {
+				continue
+			}
+
+			// Parse the transaction date
+			txnDate, err := time.Parse(time.RFC3339, dateTimeStr)
+			if err != nil {
+				// Try parsing without timezone info
+				txnDate, err = time.Parse("2006-01-02T15:04:05.999999999Z", dateTimeStr)
+				if err != nil {
+					continue // Skip if we can't parse the date
+				}
+			}
+
+			// Check if transaction is within date range
+			if startDateStr != "" && txnDate.Before(startDate) {
+				continue
+			}
+			if endDateStr != "" && txnDate.After(endDate) {
+				continue
+			}
+		}
+
+		filtered = append(filtered, txn)
+	}
+
+	return filtered
 }
 
 // --- Helper for merging account_info ---
