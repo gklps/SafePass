@@ -3061,6 +3061,25 @@ func getFTtxnHistoryHandler(c *gin.Context) {
 		c.Writer.Write([]byte("\n"))
 		return
 	}
+
+	// Get date filter parameters
+	startDateStr := c.Query("StartDate")
+	endDateStr := c.Query("EndDate")
+
+	// Validate date formats if provided
+	if startDateStr != "" {
+		if _, err := time.Parse("2006-01-02", startDateStr); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid StartDate format, expected YYYY-MM-DD"})
+			return
+		}
+	}
+	if endDateStr != "" {
+		if _, err := time.Parse("2006-01-02", endDateStr); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid EndDate format, expected YYYY-MM-DD"})
+			return
+		}
+	}
+
 	role := c.Query("Role")
 	ftTxnHistoryRequest := &FTTransactionHistoryRequest{
 		DID:  userDID,
@@ -3076,6 +3095,13 @@ func getFTtxnHistoryHandler(c *gin.Context) {
 		txns2 = arr
 	}
 	merged := mergeDedupSortTxns(txns1, txns2)
+
+	// Apply internal date filtering if date parameters are provided
+	if startDateStr != "" || endDateStr != "" {
+		filtered := filterTransactionsByDate(merged, startDateStr, endDateStr)
+		merged = filtered
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"status":     true,
 		"message":    "Retrieved FT Txn Details",
@@ -5156,6 +5182,64 @@ func mergeDedupSortTxns(txns1, txns2 []interface{}) []map[string]interface{} {
 		return e1 < e2
 	})
 	return merged
+}
+
+// --- filterTransactionsByDate: filter transactions by date range ---
+func filterTransactionsByDate(transactions []map[string]interface{}, startDateStr, endDateStr string) []map[string]interface{} {
+	if startDateStr == "" && endDateStr == "" {
+		return transactions
+	}
+
+	var startDate, endDate time.Time
+	var err error
+
+	if startDateStr != "" {
+		startDate, err = time.Parse("2006-01-02", startDateStr)
+		if err != nil {
+			// If parsing fails, return original transactions
+			return transactions
+		}
+		// Set start date to beginning of day
+		startDate = startDate.Truncate(24 * time.Hour)
+	}
+
+	if endDateStr != "" {
+		endDate, err = time.Parse("2006-01-02", endDateStr)
+		if err != nil {
+			// If parsing fails, return original transactions
+			return transactions
+		}
+		// Set end date to end of day
+		endDate = endDate.Add(24*time.Hour - time.Nanosecond)
+	}
+
+	filtered := make([]map[string]interface{}, 0)
+
+	for _, txn := range transactions {
+		dateTimeStr := toString(txn["DateTime"])
+		if dateTimeStr == "" {
+			continue
+		}
+
+		// Parse the transaction date
+		txnDate, err := time.Parse(time.RFC3339, dateTimeStr)
+		if err != nil {
+			// If parsing fails, skip this transaction
+			continue
+		}
+
+		// Apply date filters
+		if startDateStr != "" && txnDate.Before(startDate) {
+			continue
+		}
+		if endDateStr != "" && txnDate.After(endDate) {
+			continue
+		}
+
+		filtered = append(filtered, txn)
+	}
+
+	return filtered
 }
 
 // @Router /get-token [get]
