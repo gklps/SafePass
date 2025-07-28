@@ -1724,10 +1724,6 @@ func requestBalanceHandler(c *gin.Context) {
 		"result":       nil,
 		"account_info": []interface{}{merged},
 	}
-
-	if arr, ok := merged.([]interface{}); ok {
-		basicResponseMap["account_info"] = arr
-	}
 	c.JSON(http.StatusOK, basicResponseMap)
 }
 
@@ -5040,18 +5036,39 @@ func toString(val interface{}) string {
 }
 
 // mergeAccountInfo merges two account info maps by summing balances for each unique account
-func mergeAccountInfo(a1, a2 interface{}) interface{} {
-	// Both are expected to be []interface{} or map[string]interface{}
-	slice1, ok1 := a1.([]interface{})
-	slice2, ok2 := a2.([]interface{})
-	if ok1 && ok2 {
-		return mergeSumFTInfo(slice1, slice2)
+func mergeAccountInfo(info1, info2 []interface{}) map[string]interface{} {
+	if len(info1) == 0 && len(info2) == 0 {
+		return map[string]interface{}{}
 	}
-	// fallback: just return a1 if a2 is nil, or vice versa
-	if a1 != nil {
-		return a1
+	var m1, m2 map[string]interface{}
+	if len(info1) > 0 {
+		m1, _ = info1[0].(map[string]interface{})
+	} else {
+		m1 = make(map[string]interface{})
 	}
-	return a2
+	if len(info2) > 0 {
+		m2, _ = info2[0].(map[string]interface{})
+	} else {
+		m2 = make(map[string]interface{})
+	}
+	merged := make(map[string]interface{})
+	// Copy DID and did_type from either (they should be the same)
+	if m1["did"] != nil {
+		merged["did"] = m1["did"]
+	} else {
+		merged["did"] = m2["did"]
+	}
+	if m1["did_type"] != nil {
+		merged["did_type"] = m1["did_type"]
+	} else {
+		merged["did_type"] = m2["did_type"]
+	}
+	// Sum numeric fields
+	merged["rbt_amount"] = toFloat64(m1["rbt_amount"]) + toFloat64(m2["rbt_amount"])
+	merged["pledged_rbt"] = toFloat64(m1["pledged_rbt"]) + toFloat64(m2["pledged_rbt"])
+	merged["locked_rbt"] = toFloat64(m1["locked_rbt"]) + toFloat64(m2["locked_rbt"])
+	merged["pinned_rbt"] = toFloat64(m1["pinned_rbt"]) + toFloat64(m2["pinned_rbt"])
+	return merged
 }
 
 // mergeTxnHistory merges, deduplicates by TransactionID, and sorts by Epoch
