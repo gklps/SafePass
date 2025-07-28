@@ -1698,6 +1698,10 @@ func requestBalanceHandler(c *gin.Context) {
 		"result":       nil,
 		"account_info": []interface{}{merged},
 	}
+
+	if arr, ok := merged.([]interface{}); ok {
+		basicResponseMap["account_info"] = arr
+	}
 	c.JSON(http.StatusOK, basicResponseMap)
 }
 
@@ -1916,11 +1920,10 @@ func getTxnByDIDHandler(c *gin.Context) {
 		txns2 = arr
 	}
 	merged := mergeDedupSortTxns(txns1, txns2)
-	c.JSON(http.StatusOK, gin.H{
-		"status":     true,
-		"message":    "Retrieved Txn Details",
-		"TxnDetails": merged,
-	})
+	basicResponse.Status = true
+	basicResponse.Message = "Filtered Txn Details"
+	basicResponse.Result = merged
+	c.JSON(http.StatusOK, basicResponse)
 	c.Writer.Write([]byte("\n"))
 }
 
@@ -3054,6 +3057,7 @@ func getFTtxnHistoryHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"status":     true,
 		"message":    "Retrieved FT Txn Details",
+		"result":     "Successful",
 		"TxnDetails": merged,
 	})
 	c.Writer.Write([]byte("\n"))
