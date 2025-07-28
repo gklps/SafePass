@@ -1684,14 +1684,40 @@ func requestBalanceHandler(c *gin.Context) {
 	}
 	resp1, _ := RequestBalance(did, "20000")
 	resp2, _ := RequestBalance(did, "20010")
+
+	// Debug: Print resp1 and resp2
+	fmt.Printf("=== DEBUG: resp1 from node 20000 ===\n")
+	fmt.Printf("resp1: %+v\n", resp1)
+	fmt.Printf("resp1 type: %T\n", resp1)
+
+	fmt.Printf("=== DEBUG: resp2 from node 20010 ===\n")
+	fmt.Printf("resp2: %+v\n", resp2)
+	fmt.Printf("resp2 type: %T\n", resp2)
+
 	var info1, info2 []interface{}
 	if arr, ok := resp1["account_info"].([]interface{}); ok {
 		info1 = arr
+		fmt.Printf("=== DEBUG: info1 extracted ===\n")
+		fmt.Printf("info1: %+v\n", info1)
+		fmt.Printf("info1 length: %d\n", len(info1))
+	} else {
+		fmt.Printf("=== DEBUG: Failed to extract account_info from resp1 ===\n")
+		fmt.Printf("resp1[\"account_info\"] type: %T\n", resp1["account_info"])
 	}
+
 	if arr, ok := resp2["account_info"].([]interface{}); ok {
 		info2 = arr
+		fmt.Printf("=== DEBUG: info2 extracted ===\n")
+		fmt.Printf("info2: %+v\n", info2)
+		fmt.Printf("info2 length: %d\n", len(info2))
+	} else {
+		fmt.Printf("=== DEBUG: Failed to extract account_info from resp2 ===\n")
+		fmt.Printf("resp2[\"account_info\"] type: %T\n", resp2["account_info"])
 	}
 	merged := mergeAccountInfo(info1, info2)
+	fmt.Printf("=== DEBUG: merged result ===\n")
+	fmt.Printf("merged: %+v\n", merged)
+	fmt.Printf("merged type: %T\n", merged)
 	basicResponseMap := map[string]interface{}{
 		"status":       true,
 		"message":      "Got account info successfully",
