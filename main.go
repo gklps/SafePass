@@ -2201,7 +2201,7 @@ func GenerateTestRBT(data GenerateTestRBTRequest, rubixNodePort string) (map[str
 // RequestTxnsByDID sends request to Rubix node to provide list of all Txns involving the DID
 func RequestTxnsByDID(did string, role string, startDate string, endDate string, rubixNodePort string) (map[string]interface{}, error) {
 
-	url := fmt.Sprintf("http://localhost:%s/api/get-by-did?DID=%s&Role=%s&StartDate=%s&EndDate=%s", rubixNodePort, did, role, "", "")
+	url := fmt.Sprintf("http://localhost:%s/api/get-by-did?DID=%s&Role=%s&StartDate=%s&EndDate=%s", rubixNodePort, did, role, startDate, endDate)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		fmt.Println("Error creating HTTP request:", err)
