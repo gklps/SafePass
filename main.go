@@ -1842,6 +1842,7 @@ func createTestRBTHandler(c *gin.Context) {
 // @Param role query string false "Role in the transaction (e.g., sender, receiver)"
 // @Param startDate query string false "Start date for filtering transactions"
 // @Param endDate query string false "End date for filtering transactions"
+// @Param manual_filter query string false "Enable manual filtering with detailed logging (set to 'true')"
 // @Success 200 {object} BasicResponse
 // @Failure 400 {object} BasicResponse
 // @Failure 401 {object} BasicResponse
@@ -1902,6 +1903,7 @@ func getTxnByDIDHandler(c *gin.Context) {
 	role := c.Query("role")
 	startDateStr := c.Query("StartDate")
 	endDateStr := c.Query("EndDate")
+	manualFilter := c.Query("manual_filter") // New parameter for manual filtering
 
 	// **DID is Mandatory**
 	if userDID == "" {
@@ -1941,24 +1943,50 @@ func getTxnByDIDHandler(c *gin.Context) {
 	}
 
 	// **Call both Rubix Nodes to get all transactions (no date filtering)**
+	fmt.Printf("Requesting transactions for DID: %s, StartDate: %s, EndDate: %s, Role: %s\n", userDID, startDateStr, endDateStr, role)
+
 	result1, _ := RequestTxnsByDID(userDID, "", "", "", "20000")
 	result2, _ := RequestTxnsByDID(userDID, "", "", "", "20010")
 	var txns1, txns2 []interface{}
 	if arr, ok := result1["TxnDetails"].([]interface{}); ok {
 		txns1 = arr
+		fmt.Printf("Got %d transactions from node 20000\n", len(txns1))
 	}
 	if arr, ok := result2["TxnDetails"].([]interface{}); ok {
 		txns2 = arr
+		fmt.Printf("Got %d transactions from node 20010\n", len(txns2))
 	}
 	merged := mergeDedupSortTxns(txns1, txns2)
+	fmt.Printf("After merging and deduplication: %d transactions\n", len(merged))
 
 	// **Filter transactions by date and role on our side**
-	filtered := filterTransactionsByDateAndRole(merged, startDateStr, endDateStr, role, userDID)
+	var filtered []map[string]interface{}
+
+	if manualFilter == "true" {
+		// Manual filtering - apply filters manually
+		fmt.Printf("Applying manual filtering...\n")
+		filtered = manualFilterTransactions(merged, startDateStr, endDateStr, role, userDID)
+	} else {
+		// Automatic filtering
+		fmt.Printf("Applying automatic filtering...\n")
+		filtered = filterTransactionsByDateAndRole(merged, startDateStr, endDateStr, role, userDID)
+	}
+	fmt.Printf("After filtering: %d transactions\n", len(filtered))
 
 	basicResponse.Status = true
 	basicResponse.Message = "Filtered Txn Details"
 	basicResponse.Result = filtered
-	c.JSON(http.StatusOK, basicResponse)
+
+	// Create the response with the expected structure
+	response := map[string]interface{}{
+		"status":     basicResponse.Status,
+		"message":    basicResponse.Message,
+		"result":     basicResponse.Result,
+		"TxnDetails": filtered,
+	}
+
+	fmt.Printf("Sending response with %d transactions\n", len(filtered))
+	c.JSON(http.StatusOK, response)
 }
 
 // Generate secp256k1 key pair from mnemonic
@@ -3038,11 +3066,15 @@ func getFTChainRequest(tokenID string, rubixNodePort string) (map[string]interfa
 }
 
 // @Summary Get fungible token transaction history
-// @Description Retrieves the transaction history of a specific fungible token
+// @Description Retrieves the transaction history of a specific fungible token with optional date and role filtering
 // @Tags FT
 // @Accept json
 // @Produce json
 // @Param DID query string true "DID"
+// @Param Role query string false "Role in the transaction (e.g., sender, receiver)"
+// @Param StartDate query string false "Start date for filtering transactions (YYYY-MM-DD)"
+// @Param EndDate query string false "End date for filtering transactions (YYYY-MM-DD)"
+// @Param manual_filter query string false "Enable manual filtering with detailed logging (set to 'true')"
 // @Success 200 {object} map[string]interface{}
 // @Failure 400 {object} ErrorResponse
 // @Failure 401 {object} ErrorResponse
@@ -3115,22 +3147,59 @@ func getFTtxnHistoryHandler(c *gin.Context) {
 	}
 
 	role := c.Query("Role")
+	startDateStr := c.Query("StartDate")
+	endDateStr := c.Query("EndDate")
+	manualFilter := c.Query("manual_filter")
+
+	// Validate date parameters
+	if startDateStr != "" {
+		if _, err := time.Parse("2006-01-02", startDateStr); err != nil {
+			basicResponse.Message = "Invalid StartDate format, expected YYYY-MM-DD"
+			c.JSON(http.StatusBadRequest, basicResponse)
+			c.Writer.Write([]byte("\n"))
+			return
+		}
+	}
+	if endDateStr != "" {
+		if _, err := time.Parse("2006-01-02", endDateStr); err != nil {
+			basicResponse.Message = "Invalid EndDate format, expected YYYY-MM-DD"
+			c.JSON(http.StatusBadRequest, basicResponse)
+			c.Writer.Write([]byte("\n"))
+			return
+		}
+	}
 
 	ftTxnHistoryRequest := &FTTransactionHistoryRequest{
 		DID:  userDID,
 		Role: role,
 	}
 
+	fmt.Printf("Requesting FT transactions for DID: %s, StartDate: %s, EndDate: %s, Role: %s\n", userDID, startDateStr, endDateStr, role)
+
 	resp1, _ := getFTTxnHistoryRequest(*ftTxnHistoryRequest, "20000")
 	resp2, _ := getFTTxnHistoryRequest(*ftTxnHistoryRequest, "20010")
 	var txns1, txns2 []interface{}
 	if arr, ok := (*resp1)["TxnDetails"].([]interface{}); ok {
 		txns1 = arr
+		fmt.Printf("Got %d FT transactions from node 20000\n", len(txns1))
 	}
 	if arr, ok := (*resp2)["TxnDetails"].([]interface{}); ok {
 		txns2 = arr
+		fmt.Printf("Got %d FT transactions from node 20010\n", len(txns2))
 	}
 	merged := mergeDedupSortTxns(txns1, txns2)
+	fmt.Printf("After merging and deduplication: %d FT transactions\n", len(merged))
+
+	// Apply date and role filtering
+	var filtered []map[string]interface{}
+	if manualFilter == "true" {
+		fmt.Printf("Applying manual filtering to FT transactions...\n")
+		filtered = manualFilterTransactions(merged, startDateStr, endDateStr, role, userDID)
+	} else {
+		fmt.Printf("Applying automatic filtering to FT transactions...\n")
+		filtered = filterTransactionsByDateAndRole(merged, startDateStr, endDateStr, role, userDID)
+	}
+	fmt.Printf("After filtering: %d FT transactions\n", len(filtered))
 
 	basicResponse.Status = true
 	basicResponse.Message = "Retrieved FT Txn Details"
@@ -3141,7 +3210,7 @@ func getFTtxnHistoryHandler(c *gin.Context) {
 		"status":     basicResponse.Status,
 		"message":    basicResponse.Message,
 		"result":     basicResponse.Result,
-		"TxnDetails": merged,
+		"TxnDetails": filtered,
 	}
 
 	c.JSON(http.StatusOK, response)
@@ -5119,7 +5188,7 @@ func mergeDedupSortTxns(txns1, txns2 []interface{}) []map[string]interface{} {
 	sort.Slice(merged, func(i, j int) bool {
 		e1 := toInt64(merged[i]["Epoch"])
 		e2 := toInt64(merged[j]["Epoch"])
-		return e1 < e2
+		return e1 > e2
 	})
 	return merged
 }
@@ -5133,23 +5202,31 @@ func filterTransactionsByDateAndRole(transactions []map[string]interface{}, star
 	if startDateStr != "" {
 		startDate, err = time.Parse("2006-01-02", startDateStr)
 		if err != nil {
+			fmt.Printf("Warning: Failed to parse start date '%s': %v\n", startDateStr, err)
 			return transactions // Return all if parsing fails
 		}
 		// Set to start of day
 		startDate = startDate.Truncate(24 * time.Hour)
+		fmt.Printf("Filtering transactions from: %s\n", startDate.Format(time.RFC3339))
 	}
 
 	// Parse end date if provided
 	if endDateStr != "" {
 		endDate, err = time.Parse("2006-01-02", endDateStr)
 		if err != nil {
+			fmt.Printf("Warning: Failed to parse end date '%s': %v\n", endDateStr, err)
 			return transactions // Return all if parsing fails
 		}
 		// Set to end of day
 		endDate = endDate.Add(24*time.Hour - time.Nanosecond)
+		fmt.Printf("Filtering transactions until: %s\n", endDate.Format(time.RFC3339))
 	}
 
 	filtered := make([]map[string]interface{}, 0)
+	totalTransactions := len(transactions)
+	filteredCount := 0
+
+	fmt.Printf("Total transactions to filter: %d\n", totalTransactions)
 
 	for _, txn := range transactions {
 		// Filter by role if specified
@@ -5169,31 +5246,160 @@ func filterTransactionsByDateAndRole(transactions []map[string]interface{}, star
 		if startDateStr != "" || endDateStr != "" {
 			dateTimeStr := toString(txn["DateTime"])
 			if dateTimeStr == "" {
+				fmt.Printf("Warning: Transaction %s has no DateTime field\n", toString(txn["TransactionID"]))
 				continue
 			}
 
-			// Parse the transaction date
-			txnDate, err := time.Parse(time.RFC3339, dateTimeStr)
-			if err != nil {
+			// Parse the transaction date - try multiple formats
+			var txnDate time.Time
+			var parseErr error
+
+			// Try RFC3339 format first
+			txnDate, parseErr = time.Parse(time.RFC3339, dateTimeStr)
+			if parseErr != nil {
 				// Try parsing without timezone info
-				txnDate, err = time.Parse("2006-01-02T15:04:05.999999999Z", dateTimeStr)
-				if err != nil {
-					continue // Skip if we can't parse the date
+				txnDate, parseErr = time.Parse("2006-01-02T15:04:05.999999999Z", dateTimeStr)
+				if parseErr != nil {
+					// Try another common format
+					txnDate, parseErr = time.Parse("2006-01-02T15:04:05Z", dateTimeStr)
+					if parseErr != nil {
+						fmt.Printf("Warning: Failed to parse transaction date '%s' for transaction %s: %v\n",
+							dateTimeStr, toString(txn["TransactionID"]), parseErr)
+						continue // Skip if we can't parse the date
+					}
 				}
 			}
 
 			// Check if transaction is within date range
 			if startDateStr != "" && txnDate.Before(startDate) {
+				fmt.Printf("Skipping transaction %s: date %s is before start date %s\n",
+					toString(txn["TransactionID"]), txnDate.Format(time.RFC3339), startDate.Format(time.RFC3339))
 				continue
 			}
 			if endDateStr != "" && txnDate.After(endDate) {
+				fmt.Printf("Skipping transaction %s: date %s is after end date %s\n",
+					toString(txn["TransactionID"]), txnDate.Format(time.RFC3339), endDate.Format(time.RFC3339))
 				continue
 			}
 		}
 
 		filtered = append(filtered, txn)
+		filteredCount++
 	}
 
+	fmt.Printf("Filtered transactions: %d out of %d total\n", filteredCount, totalTransactions)
+	return filtered
+}
+
+// manualFilterTransactions provides an alternative filtering approach with more detailed logging
+func manualFilterTransactions(transactions []map[string]interface{}, startDateStr, endDateStr, role, userDID string) []map[string]interface{} {
+	var startDate, endDate time.Time
+	var err error
+
+	// Parse start date if provided
+	if startDateStr != "" {
+		startDate, err = time.Parse("2006-01-02", startDateStr)
+		if err != nil {
+			fmt.Printf("Manual Filter Warning: Failed to parse start date '%s': %v\n", startDateStr, err)
+			return transactions
+		}
+		startDate = startDate.Truncate(24 * time.Hour)
+		fmt.Printf("Manual Filter: Start date set to %s\n", startDate.Format(time.RFC3339))
+	}
+
+	// Parse end date if provided
+	if endDateStr != "" {
+		endDate, err = time.Parse("2006-01-02", endDateStr)
+		if err != nil {
+			fmt.Printf("Manual Filter Warning: Failed to parse end date '%s': %v\n", endDateStr, err)
+			return transactions
+		}
+		endDate = endDate.Add(24*time.Hour - time.Nanosecond)
+		fmt.Printf("Manual Filter: End date set to %s\n", endDate.Format(time.RFC3339))
+	}
+
+	filtered := make([]map[string]interface{}, 0)
+	totalTransactions := len(transactions)
+	filteredCount := 0
+
+	fmt.Printf("Manual Filter: Processing %d transactions\n", totalTransactions)
+
+	for i, txn := range transactions {
+		// Log every transaction being processed
+		txnID := toString(txn["TransactionID"])
+		dateTimeStr := toString(txn["DateTime"])
+		senderDID := toString(txn["SenderDID"])
+		receiverDID := toString(txn["ReceiverDID"])
+
+		fmt.Printf("Manual Filter: Processing transaction %d/%d: %s (DateTime: %s, Sender: %s, Receiver: %s)\n",
+			i+1, totalTransactions, txnID, dateTimeStr, senderDID, receiverDID)
+
+		// Filter by role if specified
+		if role != "" {
+			if role == "Sender" && senderDID != userDID {
+				fmt.Printf("Manual Filter: Skipping transaction %s - not a sender transaction\n", txnID)
+				continue
+			}
+			if role == "Receiver" && receiverDID != userDID {
+				fmt.Printf("Manual Filter: Skipping transaction %s - not a receiver transaction\n", txnID)
+				continue
+			}
+		}
+
+		// Filter by date range if specified
+		if startDateStr != "" || endDateStr != "" {
+			if dateTimeStr == "" {
+				fmt.Printf("Manual Filter: Skipping transaction %s - no DateTime field\n", txnID)
+				continue
+			}
+
+			// Parse the transaction date
+			var txnDate time.Time
+			var parseErr error
+
+			// Try multiple date formats
+			dateFormats := []string{
+				time.RFC3339,
+				"2006-01-02T15:04:05.999999999Z",
+				"2006-01-02T15:04:05Z",
+				"2006-01-02T15:04:05.000000000Z",
+			}
+
+			parsed := false
+			for _, format := range dateFormats {
+				txnDate, parseErr = time.Parse(format, dateTimeStr)
+				if parseErr == nil {
+					parsed = true
+					break
+				}
+			}
+
+			if !parsed {
+				fmt.Printf("Manual Filter: Failed to parse date '%s' for transaction %s\n", dateTimeStr, txnID)
+				continue
+			}
+
+			fmt.Printf("Manual Filter: Transaction %s parsed date: %s\n", txnID, txnDate.Format(time.RFC3339))
+
+			// Check date range
+			if startDateStr != "" && txnDate.Before(startDate) {
+				fmt.Printf("Manual Filter: Skipping transaction %s - date %s is before start date %s\n",
+					txnID, txnDate.Format(time.RFC3339), startDate.Format(time.RFC3339))
+				continue
+			}
+			if endDateStr != "" && txnDate.After(endDate) {
+				fmt.Printf("Manual Filter: Skipping transaction %s - date %s is after end date %s\n",
+					txnID, txnDate.Format(time.RFC3339), endDate.Format(time.RFC3339))
+				continue
+			}
+		}
+
+		filtered = append(filtered, txn)
+		filteredCount++
+		fmt.Printf("Manual Filter: Including transaction %s\n", txnID)
+	}
+
+	fmt.Printf("Manual Filter: Final result - %d out of %d transactions included\n", filteredCount, totalTransactions)
 	return filtered
 }
 
